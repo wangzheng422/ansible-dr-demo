@@ -1,0 +1,32 @@
+---
+- name: Create OADP Restore Custom Resource
+  k8s:
+    state: present
+    definition:
+      apiVersion: velero.io/v1
+      kind: Restore
+      metadata:
+        name: "restore-{{ oadp_backup_name }}-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+        namespace: openshift-adp
+      spec:
+        backupName: "{{ oadp_backup_name }}"
+        excludedResources:
+          - persistentvolumes
+          - persistentvolumeclaims
+        restorePVs: false
+
+- name: Wait for Restore to complete (or fail)
+  k8s_info:
+    api_version: velero.io/v1
+    kind: Restore
+    name: "restore-{{ oadp_backup_name }}-{{ lookup('pipe', 'date +%Y%m%d%H%M%S') }}"
+    namespace: openshift-adp
+  register: restore_status
+  until: restore_status.resources[0].status.phase in ['Completed', 'Failed', 'PartiallyFailed']
+  retries: 60
+  delay: 10
+
+- name: Fail if restore was not successful
+  fail:
+    msg: "OADP restore failed or partially failed. Status: {{ restore_status.resources[0].status.phase }}"
+  when: restore_status.resources[0].status.phase != 'Completed'

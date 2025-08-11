@@ -1,0 +1,30 @@
+---
+- name: Verify Data Consistency (Dry Run)
+  synchronize:
+    src: "{{ item.spec.nfs.path }}/"
+    dest: "rsync://{{ dr_nfs_server }}/{{ dr_nfs_base_path }}/{{ item.spec.nfs.path | basename }}/"
+    mode: pull
+    dry_run: yes
+  delegate_to: "{{ primary_nfs_server }}"
+  loop: "{{ pv_info_list }}"
+  when: item.spec.storageClassName == 'nfs-dynamic'
+  register: rsync_dry_run
+  changed_when: false
+  failed_when: false
+
+- name: Display rsync dry run results
+  debug:
+    var: rsync_dry_run.results
+
+- name: Create/Update PersistentVolumes on DR Cluster
+  k8s:
+    state: present
+    definition: "{{ item | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': dr_nfs_base_path + '/' + (item.spec.nfs.path | basename)}}}}, recursive=True) }}"
+  loop: "{{ pv_info_list }}"
+  when: item.spec.storageClassName == 'nfs-dynamic'
+
+- name: Create/Update PersistentVolumeClaims on DR Cluster
+  k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ pvc_info_list }}"

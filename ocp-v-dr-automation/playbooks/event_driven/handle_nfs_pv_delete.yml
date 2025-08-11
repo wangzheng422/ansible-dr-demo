@@ -1,0 +1,12 @@
+---
+- name: Handle NFS PV Delete Event
+  hosts: nfs_servers
+  gather_facts: false
+  vars:
+    # pv_object is passed from the EDA rulebook
+    pv_object: {}
+  tasks:
+    - name: Include role to delete NFS data from DR
+      include_role:
+        name: nfs_delete_on_event
+      when: pv_object is defined and pv_object

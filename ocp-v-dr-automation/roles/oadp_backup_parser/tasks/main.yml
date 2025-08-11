@@ -1,0 +1,74 @@
+---
+- name: Create a temporary directory for the backup
+  tempfile:
+    state: directory
+    prefix: "oadp_backup_"
+  register: temp_dir
+
+- name: Set temporary backup directory fact
+  set_fact:
+    temp_backup_dir: "{{ temp_dir.path }}"
+
+- name: Find the latest backup if backup_name is not provided
+  block:
+    - name: List backups in S3 bucket
+      aws_s3_ls:
+        bucket: "{{ oadp_s3_bucket }}"
+        prefix: "backups/"
+        delimiter: "/"
+      register: s3_backup_list
+
+    - name: Set latest backup name
+      set_fact:
+        oadp_backup_name: "{{ (s3_backup_list.common_prefixes | sort | last).split('/')[1] }}"
+  when: backup_name is not defined or backup_name == ""
+
+- name: Set backup name from variable if provided
+  set_fact:
+    oadp_backup_name: "{{ backup_name }}"
+  when: backup_name is defined and backup_name != ""
+
+- name: Download the specified OADP backup contents list
+  aws_s3_get:
+    bucket: "{{ oadp_s3_bucket }}"
+    object: "backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}-contents.json"
+    dest: "{{ temp_backup_dir }}/{{ oadp_backup_name }}-contents.json"
+
+- name: Download the OADP backup tarball
+  aws_s3_get:
+    bucket: "{{ oadp_s3_bucket }}"
+    object: "backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}.tar.gz"
+    dest: "{{ temp_backup_dir }}/{{ oadp_backup_name }}.tar.gz"
+
+- name: Unarchive the backup tarball
+  unarchive:
+    src: "{{ temp_backup_dir }}/{{ oadp_backup_name }}.tar.gz"
+    dest: "{{ temp_backup_dir }}/"
+    remote_src: yes
+
+- name: Find all PV and PVC json files
+  find:
+    paths: "{{ temp_backup_dir }}/resources/persistentvolumes"
+    patterns: "*.json"
+  register: pv_files
+
+- find:
+    paths: "{{ temp_backup_dir }}/resources/persistentvolumeclaims"
+    patterns: "*.json"
+  register: pvc_files
+
+- name: Read and store PV definitions
+  set_fact:
+    pv_info_list: "{{ pv_info_list | default([]) + [lookup('file', item.path) | from_json] }}"
+  loop: "{{ pv_files.files }}"
+
+- name: Read and store PVC definitions
+  set_fact:
+    pvc_info_list: "{{ pvc_info_list | default([]) + [lookup('file', item.path) | from_json] }}"
+  loop: "{{ pvc_files.files }}"
+
+- name: Return parsed data and temp dir path
+  set_fact:
+    pv_info_list: "{{ pv_info_list }}"
+    pvc_info_list: "{{ pvc_info_list }}"
+    temp_backup_dir: "{{ temp_backup_dir }}"

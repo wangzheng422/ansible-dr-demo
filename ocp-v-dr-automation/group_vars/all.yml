@@ -1,0 +1,17 @@
+---
+# OADP Backup Configuration
+oadp_s3_bucket: "ocp-v-dr-backups"
+oadp_s3_region: "us-east-1"
+oadp_s3_endpoint: "s3.amazonaws.com"
+# These should be stored in AAP credential store
+# oadp_s3_access_key: "YOUR_ACCESS_KEY"
+# oadp_s3_secret_key: "YOUR_SECRET_KEY"
+
+# NFS Configuration
+primary_nfs_server: "primary-nfs.example.com"
+dr_nfs_server: "dr-nfs.example.com"
+primary_nfs_base_path: "/exports/nfs"
+dr_nfs_base_path: "/exports/nfs_dr"
+
+# DR Workflow Configuration
+default_backup_name: "" # Empty means find the latest
