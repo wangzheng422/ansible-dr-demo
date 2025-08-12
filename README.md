@@ -43,9 +43,9 @@ additional_build_steps:
     - ENV PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.11/site-packages:/usr/local/lib64/python3.11/site-packages
 EOF
 
-ansible-builder build -f eda-de-openshift-aap25.yaml --container-runtime podman -v3 --squash all --prune-images -t quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11
+ansible-builder build -f eda-de-openshift-aap25.yaml --container-runtime podman -v3 --squash all --prune-images -t quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11-v01
 
-podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11
+podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11-v01
 
 
 ```
