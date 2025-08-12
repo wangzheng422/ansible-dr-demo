@@ -3,33 +3,33 @@
   debug:
     var: pv_object
 
-- name: Set DR path for deletion
-  set_fact:
-    nfs_dest_path_to_delete: "{{ dr_nfs_base_path }}/{{ pv_object.spec.nfs.path | basename }}/"
-  when: pv_object.spec.nfs.server == primary_nfs_server
+# - name: Set DR path for deletion
+#   set_fact:
+#     nfs_dest_path_to_delete: "{{ dr_nfs_base_path }}/{{ pv_object.spec.nfs.path | basename }}/"
+#   when: pv_object.spec.nfs.server == primary_nfs_server
 
-- name: Create a temporary empty directory for rsync delete
-  tempfile:
-    state: directory
-    prefix: "empty_dir_for_rsync_delete_"
-  register: empty_dir_reg
-  delegate_to: localhost
-  become: no
-  run_once: true
+# - name: Create a temporary empty directory for rsync delete
+#   tempfile:
+#     state: directory
+#     prefix: "empty_dir_for_rsync_delete_"
+#   register: empty_dir_reg
+#   delegate_to: localhost
+#   become: no
+#   run_once: true
 
-- name: Remove directory on DR NFS server using rsync --delete
-  synchronize:
-    src: "{{ empty_dir_reg.path }}/"
-    dest: "rsync://{{ dr_nfs_server }}/{{ nfs_dest_path_to_delete }}"
-    archive: yes
-    delete: yes
-  delegate_to: "{{ primary_nfs_server }}"
-  when: nfs_dest_path_to_delete is defined
+# - name: Remove directory on DR NFS server using rsync --delete
+#   synchronize:
+#     src: "{{ empty_dir_reg.path }}/"
+#     dest: "rsync://{{ dr_nfs_server }}/{{ nfs_dest_path_to_delete }}"
+#     archive: yes
+#     delete: yes
+#   delegate_to: "{{ primary_nfs_server }}"
+#   when: nfs_dest_path_to_delete is defined
 
-- name: Clean up the temporary empty directory
-  file:
-    path: "{{ empty_dir_reg.path }}"
-    state: absent
-  delegate_to: localhost
-  become: no
-  run_once: true
+# - name: Clean up the temporary empty directory
+#   file:
+#     path: "{{ empty_dir_reg.path }}"
+#     state: absent
+#   delegate_to: localhost
+#   become: no
+#   run_once: true

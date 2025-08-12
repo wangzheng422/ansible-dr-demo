@@ -3,26 +3,26 @@
   debug:
     var: pv_object
 
-- name: Set source and destination paths for rsync
-  set_fact:
-    nfs_source_path: "{{ pv_object.spec.nfs.path }}/"
-    nfs_dest_path: "{{ dr_nfs_base_path }}/{{ pv_object.spec.nfs.path | basename }}/"
-  when: pv_object.spec.nfs.server == primary_nfs_server
+# - name: Set source and destination paths for rsync
+#   set_fact:
+#     nfs_source_path: "{{ pv_object.spec.nfs.path }}/"
+#     nfs_dest_path: "{{ dr_nfs_base_path }}/{{ pv_object.spec.nfs.path | basename }}/"
+#   when: pv_object.spec.nfs.server == primary_nfs_server
 
-- name: Ensure destination directory exists on DR NFS server
-  file:
-    path: "{{ nfs_dest_path }}"
-    state: directory
-    mode: '0755'
-  delegate_to: "{{ dr_nfs_server }}"
-  when: nfs_dest_path is defined
+# - name: Ensure destination directory exists on DR NFS server
+#   file:
+#     path: "{{ nfs_dest_path }}"
+#     state: directory
+#     mode: '0755'
+#   delegate_to: "{{ dr_nfs_server }}"
+#   when: nfs_dest_path is defined
 
-- name: Sync data from Primary to DR NFS server
-  synchronize:
-    src: "{{ nfs_source_path }}"
-    dest: "rsync://{{ dr_nfs_server }}/{{ nfs_dest_path }}"
-    archive: yes
-    delete: yes
-    compress: yes
-  delegate_to: "{{ primary_nfs_server }}"
-  when: nfs_source_path is defined and nfs_dest_path is defined
+# - name: Sync data from Primary to DR NFS server
+#   synchronize:
+#     src: "{{ nfs_source_path }}"
+#     dest: "rsync://{{ dr_nfs_server }}/{{ nfs_dest_path }}"
+#     archive: yes
+#     delete: yes
+#     compress: yes
+#   delegate_to: "{{ primary_nfs_server }}"
+#   when: nfs_source_path is defined and nfs_dest_path is defined
