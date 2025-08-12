@@ -1,0 +1,27 @@
+---
+- name: Listen for OCP Persistent Volume Changes (Debug)
+  hosts: localhost
+  sources:
+    - sabre1041.eda.k8s:
+        api_version: v1
+        kind: PersistentVolume
+        namespace: "" # Listen in all namespaces
+
+  rules:
+    # Rule: Handle creation and modification of NFS PVs
+    - name: Handle NFS PV Create or Update (Debug)
+      condition: >
+        (event.type == "ADDED" or event.type == "MODIFIED") and
+        event.resource.spec.storageClassName == "nfs-dynamic"
+      action:
+        debug:
+          msg: "NFS PV Created or Modified: {{ event.resource.metadata.name }} (Type: {{ event.type }})"
+
+    # Rule: Handle deletion of NFS PVs
+    - name: Handle NFS PV Deletion (Debug)
+      condition: >
+        event.type == "DELETED" and
+        event.resource.spec.storageClassName == "nfs-dynamic"
+      action:
+        debug:
+          msg: "NFS PV Deleted: {{ event.resource.metadata.name }} (Type: {{ event.type }})"

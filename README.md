@@ -52,3 +52,5 @@ podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11
 
 ## config app
 
+<img src="imgs/README.md/2025-08-12-11-40-26.png" width="1024">
+
