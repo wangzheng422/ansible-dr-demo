@@ -49,3 +49,6 @@ podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11
 
 
 ```
+
+## config app
+
