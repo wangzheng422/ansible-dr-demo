@@ -5,6 +5,7 @@
       - sabre1041.eda.k8s:
           api_key: "{{ k8s_api_key }}" # Added for API authentication
           host: "{{ k8s_host }}" # Added for API host
+          validate_certs: "no"
           api_version: v1
           kind: PersistentVolume
           namespace: "" # Listen in all namespaces
