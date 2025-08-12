@@ -19,7 +19,7 @@ version: 3
 
 images:
   base_image:
-    name: 'registry.redhat.io/ansible-automation-platform-25/de-minimal-rhel8:latest'
+    name: 'registry.redhat.io/ansible-automation-platform-25/de-supported-rhel8:latest'
 
 dependencies:
   galaxy:
@@ -43,9 +43,9 @@ additional_build_steps:
     - ENV PYTHONPATH=$PYTHONPATH:/usr/local/lib/python3.11/site-packages:/usr/local/lib64/python3.11/site-packages
 EOF
 
-ansible-builder build -f eda-de-openshift-aap25.yaml --container-runtime podman -v3 --squash all --prune-images -t quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11-v01
+ansible-builder build -f eda-de-openshift-aap25.yaml --container-runtime podman -v3 --squash all --prune-images -t quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.12
 
-podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11-v01
+podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.12
 
 
 ```
