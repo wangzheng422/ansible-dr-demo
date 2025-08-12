@@ -14,7 +14,7 @@
     - name: List backups in S3 bucket
       aws_s3_ls:
         bucket: "{{ oadp_s3_bucket }}"
-        prefix: "backups/"
+        prefix: "velero/backups/"
         delimiter: "/"
       register: s3_backup_list
 
@@ -28,16 +28,16 @@
     oadp_backup_name: "{{ backup_name }}"
   when: backup_name is defined and backup_name != ""
 
-- name: Download the specified OADP backup contents list
-  aws_s3_get:
-    bucket: "{{ oadp_s3_bucket }}"
-    object: "backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}-contents.json"
-    dest: "{{ temp_backup_dir }}/{{ oadp_backup_name }}-contents.json"
+# - name: Download the specified OADP backup contents list
+#   aws_s3_get:
+#     bucket: "{{ oadp_s3_bucket }}"
+#     object: "velero/backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}-contents.json"
+#     dest: "{{ temp_backup_dir }}/{{ oadp_backup_name }}-contents.json"
 
 - name: Download the OADP backup tarball
   aws_s3_get:
     bucket: "{{ oadp_s3_bucket }}"
-    object: "backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}.tar.gz"
+    object: "velero/backups/{{ oadp_backup_name }}/{{ oadp_backup_name }}.tar.gz"
     dest: "{{ temp_backup_dir }}/{{ oadp_backup_name }}.tar.gz"
 
 - name: Unarchive the backup tarball
