@@ -17,33 +17,58 @@
 
 **自动化架构图：**
 
+**模式一: 事件驱动的实时复制 (Event-Driven Replication)**
 ```mermaid
 graph TD
-    subgraph Mode 1: Event-Driven Replication
-        A[Primary OCP Cluster] --> B{PV & VolumeSnapshot Events<br>ADDED/MODIFIED/DELETED};
-        B --> C[Python Event Forwarder<br>in-cluster deployment];
-        C -- HTTP POST --> D[AAP EDA Controller<br>ansible.eda.webhook];
-        D --> E{Rulebook Matches Condition};
-        E -- PV ADDED/MODIFIED --> F[Trigger rsync<br>Primary NFS Server];
-        F --> G[rsync Data to DR<br>DR NFS Server];
-        E -- PV DELETED --> H[Trigger Delete<br>DR NFS Server];
-        E -- VolumeSnapshot ADDED --> S[Trigger Snapshot Sync Logic];
-    end
+    A[Primary OCP Cluster] --> B{PV & VolumeSnapshot Events<br>ADDED/MODIFIED/DELETED};
+    B --> C[Python Event Forwarder<br>in-cluster deployment];
+    C -- HTTP POST --> D[AAP EDA Controller<br>ansible.eda.webhook];
+    D --> E{Rulebook Matches Condition};
+    E -- PV ADDED/MODIFIED --> F[Trigger rsync on Primary NFS];
+    F --> G[DR NFS Server];
+    E -- PV DELETED --> H[Trigger Delete on DR NFS];
+    E -- VolumeSnapshot ADDED --> S1[Sync Snapshot Metadata];
+    E -- VolumeSnapshot DELETED --> S2[Delete Snapshot Metadata];
 
-    subgraph Mode 2: Manual Failover
-        I[Administrator] --> J[Trigger Execute Failover Workflow];
-        J --> K[Optional: Shut down VMs<br>on Primary OCP];
-        K --> L[Optional: Set Primary Storage<br>Read-Only];
-        L --> M[oadp_backup_parser:<br>Download OADP Backup from S3];
-        M --> N[Parse PV/PVC Definitions];
-        N --> O[dr_storage_provisioner:<br>Verify Data Consistency<br>rsync --dry-run];
-        O --> P[dr_storage_provisioner:<br>Apply Modified PVs/PVCs<br>to DR OCP];
-        P --> Q[oadp_restore_trigger:<br>Apply Restore Object<br>exclude PV/PVC to DR OCP];
-        Q --> R[Recreate VMs and Resources<br>on DR OCP];
-        R --> S[Verify VM Status];
-        S --> T[Clean Up Temporary Files];
-        T --> U[Generate Report];
-    end
+    style A fill:#cce5ff,stroke:#333,stroke-width:2px
+    style B fill:#cce5ff,stroke:#333,stroke-width:2px
+    style C fill:#cce5ff,stroke:#333,stroke-width:2px
+    style D fill:#cce5ff,stroke:#333,stroke-width:2px
+    style E fill:#cce5ff,stroke:#333,stroke-width:2px
+    style F fill:#cce5ff,stroke:#333,stroke-width:2px
+    style G fill:#cce5ff,stroke:#333,stroke-width:2px
+    style H fill:#cce5ff,stroke:#333,stroke-width:2px
+    style S1 fill:#cce5ff,stroke:#333,stroke-width:2px
+    style S2 fill:#cce5ff,stroke:#333,stroke-width:2px
+```
+
+**模式二: 手动灾备恢复 (Manual Failover)**
+```mermaid
+graph TD
+    I[Administrator] --> J[Execute Failover Workflow];
+    J --> K[Optional: Shut down VMs on Primary];
+    K --> L[Optional: Set Primary Storage Read-Only];
+    L --> M[Download OADP Backup from S3];
+    M --> N[Parse PV/PVC Definitions];
+    N --> O[Final Data Sync<br>rsync on DR NFS Server];
+    O --> P[Apply Modified PVs/PVCs to DR OCP];
+    P --> Q[Apply OADP Restore<br>exclude PV/PVC];
+    Q --> R[Verify VM Status on DR OCP];
+    R --> T[Clean Up Temporary Files];
+    T --> U[Generate Report];
+
+    style I fill:#d4edda,stroke:#333,stroke-width:2px
+    style J fill:#d4edda,stroke:#333,stroke-width:2px
+    style K fill:#d4edda,stroke:#333,stroke-width:2px
+    style L fill:#d4edda,stroke:#333,stroke-width:2px
+    style M fill:#d4edda,stroke:#333,stroke-width:2px
+    style N fill:#d4edda,stroke:#333,stroke-width:2px
+    style O fill:#d4edda,stroke:#333,stroke-width:2px
+    style P fill:#d4edda,stroke:#333,stroke-width:2px
+    style Q fill:#d4edda,stroke:#333,stroke-width:2px
+    style R fill:#d4edda,stroke:#333,stroke-width:2px
+    style T fill:#d4edda,stroke:#333,stroke-width:2px
+    style U fill:#d4edda,stroke:#333,stroke-width:2px
 ```
 
 ### **3\. Ansible 项目结构设计 (集成 EDA)**
@@ -160,11 +185,11 @@ ocp-v-dr-automation/
   * **playbooks/event_driven/handle_nfs_pv_sync.yml**:
     1. 接收 AAP EDA 传递过来的 `pv_object` 变量。
     2. 调用 `nfs_sync_on_event` 角色。
-    3. 角色逻辑：解析 `pv_object.spec.nfs.path`，构造源和目标路径，在 NFS 服务器上执行 `rsync`。
+    3. 角色逻辑：仅调试传入的 `pv_object` 变量。所有路径构造和 `rsync` 逻辑均已注释。
   * **playbooks/event_driven/handle_nfs_pv_delete.yml**:
     1. 接收 `pv_object` 变量。
     2. 调用 `nfs_delete_on_event` 角色。
-    3. 角色逻辑：解析 `pv_object.spec.nfs.path`，构造出在灾备 NFS 上的对应目录路径，然后执行 `rsync` , 确保删除的内部也同步删除。
+    3. 角色逻辑：仅调试传入的 `pv_object` 变量。所有路径构造和 `rsync` 逻辑均已注释。
   * **playbooks/event_driven/handle_snapshot_sync.yml**:
     1. 接收 `snapshot_object` 变量。
     2. 调用 `snapshot_sync_on_event` 角色。
