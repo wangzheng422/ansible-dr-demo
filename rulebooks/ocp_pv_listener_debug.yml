@@ -1,6 +1,6 @@
 ---
 - name: Listen for OCP Persistent Volume Changes (Debug)
-  hosts: localhost
+  hosts: all
 
   sources:
       - sabre1041.eda.k8s:
