@@ -20,13 +20,14 @@
 ```mermaid
 graph TD
     subgraph Mode 1: Event-Driven Replication
-        A[Primary OCP Cluster] --> B{PV Event<br>ADDED/MODIFIED/DELETED};
-        B --> C[Event Source<br>k8s plugin];
-        C --> D[AAP EDA Controller];
+        A[Primary OCP Cluster] --> B{PV & VolumeSnapshot Events<br>ADDED/MODIFIED/DELETED};
+        B --> C[Python Event Forwarder<br>in-cluster deployment];
+        C -- HTTP POST --> D[AAP EDA Controller<br>ansible.eda.webhook];
         D --> E{Rulebook Matches Condition};
         E -- PV ADDED/MODIFIED --> F[Trigger rsync<br>Primary NFS Server];
         F --> G[rsync Data to DR<br>DR NFS Server];
         E -- PV DELETED --> H[Trigger Delete<br>DR NFS Server];
+        E -- VolumeSnapshot ADDED --> S[Trigger Snapshot Sync Logic];
     end
 
     subgraph Mode 2: Manual Failover
@@ -54,48 +55,54 @@ ocp-v-dr-automation/
 │   ├── all.yml
 │   └── ...
 ├── rulebooks/
-│   └── ocp_pv_listener.yml       # EDA 规则手册，用于监听和响应PV事件
+│   └── ocp_dr_events.yml         # EDA 规则手册，监听PV和Snapshot事件
 ├── roles/
-│   ├── nfs_sync_on_event/        # 角色: 响应创建/修改事件，执行rsync
-│   ├── nfs_delete_on_event/      # 角色: 响应删除事件，删除远程目录
+│   ├── nfs_sync_on_event/        # 角色: 响应PV创建/修改事件，执行rsync
+│   ├── nfs_delete_on_event/      # 角色: 响应PV删除事件，删除远程目录
+│   ├── snapshot_sync_on_event/   # 角色: 响应Snapshot事件，同步快照元数据
 │   ├── oadp_backup_parser/       # 角色: (DR用) 解析OADP备份
 │   ├── dr_storage_provisioner/   # 角色: (DR用) 在DR集群部署PV/PVC
 │   └── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
 └── playbooks/
     ├── event_driven/
     │   ├── handle_nfs_pv_sync.yml    # Playbook: (EDA用) 调用nfs_sync_on_event
-    │   └── handle_nfs_pv_delete.yml  # Playbook: (EDA用) 调用nfs_delete_on_event
+    │   ├── handle_nfs_pv_delete.yml  # Playbook: (EDA用) 调用nfs_delete_on_event
+    │   └── handle_snapshot_sync.yml  # Playbook: (EDA用) 调用snapshot_sync_on_event
     └── manual_dr/
         └── execute_failover.yml      # Playbook: (DR用) 执行完整的灾备切换
 ```
 ### **4\. 模式一：事件驱动数据复制逻辑详解**
 
-#### 流程 1-2: OCP 钩子与事件触发
+#### 流程 1-2: OCP 事件转发与 Webhook 触发
 
-* **实现方式**: 在主 OpenShift 集群上部署一个事件源（Event Source），用于监听 Kubernetes API Server 的事件。最常见的方式是使用 ansible.eda.k8s 插件，它可以直接监听集群资源的变化。  
-* **触发条件**: 监听 v1.PersistentVolume 资源。  
-  * ADDED: 当有新的 PV 被创建时。  
-  * MODIFIED: 当一个 PV 的元数据或状态发生变化时。  
-  * DELETED: 当一个 PV 被删除时。
+* **实现方式**: 在主 OpenShift 集群上，通过一个定制的 **Python 事件转发器 (k8s_event_forwarder.py)** 来实现。
+  * 该转发器作为一个 Deployment 运行在集群内部，使用 `in-cluster` Service Account 进行认证。
+  * 它通过 `kubernetes` Python 客户端的 `watch` 功能，同时监视 `PersistentVolume` 和 `VolumeSnapshot` 两种资源。
+  * 当捕获到资源的 `ADDED`, `MODIFIED`, 或 `DELETED` 事件时，它会将事件封装成一个统一的 JSON 载荷，通过 HTTP POST 请求发送到 AAP EDA Controller 上配置的 Webhook 地址。
+* **触发条件**:
+  * **PersistentVolume**: 监听 `v1.PersistentVolume` 资源的所有事件。
+  * **VolumeSnapshot**: 监听 `snapshot.storage.k8s.io/v1` 组下的 `VolumeSnapshot` 资源的所有事件。
 
 #### 流程 3-4: AAP EDA Rulebook 与逻辑分发
 
-* **文件**: rulebooks/ocp_pv_listener.yml  
+* **文件**: rulebooks/ocp_dr_events.yml  
 * **逻辑设计**:
 ```yaml
 ---
-- name: Listen for OCP Persistent Volume Changes
+- name: Process OCP DR Events from Webhook
   hosts: localhost
   sources:
-    - ansible.eda.k8s:
-        api_version: v1
-        kind: PersistentVolume
-        namespace: "" # 监听所有命名空间
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        # 在 AAP 中，需要配置 token 来保护此 webhook
+        # token: "{{ eda_webhook_token }}"
 
   rules:
-    # 规则：处理NFS PV的创建和修改
+    # 规则 1: 处理 NFS PV 的创建和修改
     - name: Handle NFS PV Create or Update
       condition: >
+        event.kind == "PersistentVolume" and
         (event.type == "ADDED" or event.type == "MODIFIED") and
         event.resource.spec.storageClassName == "nfs-dynamic"
       action:
@@ -104,11 +111,12 @@ ocp-v-dr-automation/
           organization: "Default"
           job_args:
             extra_vars:
-              pv_object: "{{ event.resource }}" # 将整个PV对象作为变量传递
+              pv_object: "{{ event.resource }}" # 转发器封装的完整PV对象
 
-    # 规则：处理NFS PV的删除
+    # 规则 2: 处理 NFS PV 的删除
     - name: Handle NFS PV Deletion
       condition: >
+        event.kind == "PersistentVolume" and
         event.type == "DELETED" and
         event.resource.spec.storageClassName == "nfs-dynamic"
       action:
@@ -119,10 +127,19 @@ ocp-v-dr-automation/
             extra_vars:
               pv_object: "{{ event.resource }}"
 
-    # 可以为其他存储类型（如 a-b-c-storage）添加更多规则
-    # - name: Handle ABC Storage Create or Update
-    #   condition: event.resource.spec.storageClassName == "a-b-c-storage"
-    #   action: ...
+    # 规则 3: 处理 VolumeSnapshot 的创建
+    - name: Handle VolumeSnapshot Creation
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "ADDED" and
+        event.resource.status.readyToUse == true
+      action:
+        run_job_template:
+          name: "EDA - Sync VolumeSnapshot Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              snapshot_object: "{{ event.resource }}"
 ```
 * **对应的 Playbooks**:
   * **playbooks/event_driven/handle_nfs_pv_sync.yml**:
@@ -133,6 +150,10 @@ ocp-v-dr-automation/
     1. 接收 `pv_object` 变量。
     2. 调用 `nfs_delete_on_event` 角色。
     3. 角色逻辑：解析 `pv_object.spec.nfs.path`，构造出在灾备 NFS 上的对应目录路径，然后执行 `rsync` , 确保删除的内部也同步删除。
+  * **playbooks/event_driven/handle_snapshot_sync.yml**:
+    1. 接收 `snapshot_object` 变量。
+    2. 调用 `snapshot_sync_on_event` 角色。
+    3. 角色逻辑：解析快照元数据，可能需要在灾备站点记录快照信息或触发其他相关操作。
 
 ### **5\. 模式二：手动灾备恢复逻辑详解**
 
@@ -205,7 +226,8 @@ ocp-v-dr-automation/
 1. **EDA Controller 配置**:  
    * 创建一个项目（Project）指向包含 rulebooks/ 目录的 Git 仓库。  
    * 配置一个 Decision Environment（通常使用默认的）。  
-   * 创建一个 Rulebook Activation，关联项目和 ocp_pv_listener.yml 规则手册，并启动它。  
+   * 创建一个 Rulebook Activation，关联项目和 ocp_dr_events.yml 规则手册，并启动它。  
+   * **重要**: 在 Rulebook Activation 中，需要将 Webhook 的 URL 和认证 Token 作为环境变量传递给 `k8s_event_forwarder.py` 的 Deployment。
 2. **Workflow 配置**:  
    * 创建两个 Job Template，分别对应 EDA 触发的 handle_nfs_pv_sync.yml 和 handle_nfs_pv_delete.yml。  
    * 创建一个 "一键灾备切换" Workflow Template，关联 manual_dr/execute_failover.yml Playbook，并配置调查问卷以接收 backup_name。
