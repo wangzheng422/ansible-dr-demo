@@ -59,7 +59,8 @@ ocp-v-dr-automation/
 ├── roles/
 │   ├── nfs_sync_on_event/        # 角色: 响应PV创建/修改事件，执行rsync
 │   ├── nfs_delete_on_event/      # 角色: 响应PV删除事件，删除远程目录
-│   ├── snapshot_sync_on_event/   # 角色: 响应Snapshot事件，同步快照元数据
+│   ├── snapshot_sync_on_event/   # 角色: 响应Snapshot创建事件，同步元数据
+│   ├── snapshot_delete_on_event/ # 角色: 响应Snapshot删除事件，清理元数据
 │   ├── oadp_backup_parser/       # 角色: (DR用) 解析OADP备份
 │   ├── dr_storage_provisioner/   # 角色: (DR用) 在DR集群部署PV/PVC
 │   └── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
@@ -67,7 +68,8 @@ ocp-v-dr-automation/
     ├── event_driven/
     │   ├── handle_nfs_pv_sync.yml    # Playbook: (EDA用) 调用nfs_sync_on_event
     │   ├── handle_nfs_pv_delete.yml  # Playbook: (EDA用) 调用nfs_delete_on_event
-    │   └── handle_snapshot_sync.yml  # Playbook: (EDA用) 调用snapshot_sync_on_event
+    │   ├── handle_snapshot_sync.yml  # Playbook: (EDA用) 调用snapshot_sync_on_event
+    │   └── handle_snapshot_delete.yml# Playbook: (EDA用) 调用snapshot_delete_on_event
     └── manual_dr/
         └── execute_failover.yml      # Playbook: (DR用) 执行完整的灾备切换
 ```
@@ -140,6 +142,19 @@ ocp-v-dr-automation/
           job_args:
             extra_vars:
               snapshot_object: "{{ event.resource }}"
+
+    # 规则 4: 处理 VolumeSnapshot 的删除
+    - name: Handle VolumeSnapshot Deletion
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete VolumeSnapshot Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              snapshot_object: "{{ event.resource }}"
 ```
 * **对应的 Playbooks**:
   * **playbooks/event_driven/handle_nfs_pv_sync.yml**:
@@ -154,6 +169,10 @@ ocp-v-dr-automation/
     1. 接收 `snapshot_object` 变量。
     2. 调用 `snapshot_sync_on_event` 角色。
     3. 角色逻辑：解析快照元数据，可能需要在灾备站点记录快照信息或触发其他相关操作。
+  * **playbooks/event_driven/handle_snapshot_delete.yml**:
+    1. 接收 `snapshot_object` 变量。
+    2. 调用 `snapshot_delete_on_event` 角色。
+    3. 角色逻辑：根据快照元数据，在灾备站点清理对应的记录或资源。
 
 ### **5\. 模式二：手动灾备恢复逻辑详解**
 
@@ -189,7 +208,9 @@ ocp-v-dr-automation/
 *   **Playbook 内部逻辑**:
     1.  **输入**: 上一步输出的 `pv_info_list`。
     2.  **逻辑分发**: 使用 `when` 条件或 `include_role` 的 `when` 子句，根据 `item.spec.storageClassName` 来决定执行哪个存储类型的验证逻辑。
-    3.  **NFS 验证**: `delegate_to: nfs_server`，在 NFS 服务器上执行。根据 `pv_info_list` 中的路径，使用 `rsync --dry-run` 检查主备数据是否一致。如果不一致，可以打印警告信息（因为 EDA 应该已经保证了数据同步）。
+    3.  **NFS 验证**: **在灾备站点的 NFS 服务器上 (`delegate_to: dr_nfs_server`)** 执行最终数据同步。根据 `pv_info_list` 中的路径信息，构造 `rsync` 命令，将主 NFS 服务器的数据拉取到灾备 NFS 服务器。这是确保数据最终一致性的关键一步。
+        *   **命令示例**: `rsync -av --delete user@primary-nfs:/path/to/data/ /path/to/dr/data/`
+        *   在执行实际恢复前，可以先运行 `rsync --dry-run` 进行检查，如果不一致，可以打印警告信息。
 
 #### 流程 6: 在 DR OCP 上部署存储
 
