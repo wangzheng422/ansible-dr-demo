@@ -50,6 +50,31 @@ podman push quay.io/wangzheng422/qimgs:k8s-eda-de-openshift-aap25-2025.08.11
 
 ```
 
+## test on linux
+
+```bash
+mkdir ~/venv
+cd ~/venv
+python3 -m venv eda-env
+
+source ~/venv/eda-env/bin/activate
+
+pip install ansible-rulebook ansible-core 
+
+ansible-galaxy collection install sabre1041.eda ansible.eda
+
+pip install requests kubernetes
+
+sudo dnf install -y java-17-openjdk-devel
+
+sudo alternatives --config java
+
+
+ansible-rulebook --rulebook rulebooks/ocp_pv_listener_debug.yml --verbose
+
+
+```
+
 ## config app
 
 <img src="imgs/README.md/2025-08-12-11-40-26.png" width="1024">
