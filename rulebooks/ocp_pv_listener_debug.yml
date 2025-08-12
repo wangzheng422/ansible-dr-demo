@@ -1,13 +1,12 @@
 ---
-- name: Listen for OCP Persistent Volume Changes (Debug)
-  hosts: localhost
-  sources:
+sources:
     - sabre1041.eda.k8s:
+        api_key: "{{ k8s_api_key }}" # Added for API authentication
+        host: "{{ k8s_host }}" # Added for API host
         api_version: v1
         kind: PersistentVolume
         namespace: "" # Listen in all namespaces
-
-  rules:
+rules:
     # Rule: Handle creation and modification of NFS PVs
     - name: Handle NFS PV Create or Update (Debug)
       condition: >
