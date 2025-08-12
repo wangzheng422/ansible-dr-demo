@@ -1,15 +1,18 @@
 ### 项目名称：OCP-V 事件驱动灾备自动化项目
 
-### **1\. 项目目标与双模架构**
+### **1. 项目目标与三模架构**
 
 目标：  
-本项目旨在构建一个双模式、高度自动化的 OCP-V 灾备解决方案。它结合了 Ansible Automation Platform (AAP) EDA 的实时事件处理能力和传统的 AAP Workflow 的手动恢复能力，以实现数据近实时同步和一键式灾备切换。  
-**双模架构：**
+本项目旨在构建一个三模式、高度自动化的 OCP-V 灾备解决方案。它结合了事件驱动的实时同步、周期性的主动校验和手动触发的灾备恢复能力，以实现数据近实时同步、最终一致性保障和一键式灾备切换。  
+**三模架构：**
 
 1. **模式一：事件驱动的实时数据复制 (Event-Driven Replication)**  
    * **核心**：AAP Event-Driven Ansible (EDA) Controller。  
-   * **目标**：通过监听主 OpenShift 集群的 PV（PersistentVolume）事件，自动、实时地将底层存储数据同步到灾备站点。这取代了原方案中定时的、批量的同步任务。  
-2. **模式二：手动触发的灾备恢复 (Manual Failover)**  
+   * **目标**：通过监听主 OpenShift 集群的 PV（PersistentVolume）事件，自动、实时地将底层存储数据同步到灾备站点。此模式响应速度最快，是数据同步的主要手段。
+2. **模式二：周期性的主动同步 (Scheduled Proactive Sync)**
+   * **核心**：AAP Workflow Scheduler。
+   * **目标**：定时（例如每小时）对主站点的所有 PV 和 VolumeSnapshot 进行全面扫描和同步，作为事件驱动模式的补充和校验，确保数据最终一致性，防止因事件丢失导致的数据差异。
+3. **模式三：手动触发的灾备恢复 (Manual Failover)**  
    * **核心**：AAP Workflow。  
    * **目标**：在发生灾难时，由管理员手动触发一个标准化的工作流，在灾备站点重建存储并恢复应用服务。
 
@@ -42,7 +45,42 @@ graph TD
     style S2 fill:#cce5ff,stroke:#333,stroke-width:2px
 ```
 
-**模式二: 手动灾备恢复 (Manual Failover)**
+**模式二: 周期性的主动同步 (Scheduled Proactive Sync)**
+```mermaid
+graph TD
+    subgraph AAP Controller
+        A[Scheduler<br>CRON Job] -- Triggers Hourly --> B[Execute Periodic Sync Workflow];
+    end
+
+    subgraph Ansible Execution
+        B --> C[Playbook: execute_periodic_sync.yml];
+        C --> D[Get All PVs & Snapshots<br>from Primary OCP];
+        D --> E{Loop through each PV};
+        E -- NFS PV --> F[Role: periodic_storage_sync<br>Execute rsync for PV directory];
+        D --> G{Loop through each Snapshot};
+        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata];
+        C --> I[Log Results & Generate Report];
+    end
+
+    subgraph Storage
+        F --> J[DR NFS Server];
+        H --> K[DR Metadata Store];
+    end
+
+    style A fill:#e1e1e1,stroke:#333,stroke-width:2px
+    style B fill:#e1e1e1,stroke:#333,stroke-width:2px
+    style C fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style D fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style E fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style F fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style G fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style H fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style I fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style J fill:#d4edda,stroke:#333,stroke-width:2px
+    style K fill:#d4edda,stroke:#333,stroke-width:2px
+```
+
+**模式三: 手动灾备恢复 (Manual Failover)**
 ```mermaid
 graph TD
     I[Administrator] --> J[Execute Failover Workflow];
@@ -88,15 +126,18 @@ ocp-v-dr-automation/
 │   ├── snapshot_delete_on_event/ # 角色: 响应Snapshot删除事件，清理元数据
 │   ├── oadp_backup_parser/       # 角色: (DR用) 解析OADP备份
 │   ├── dr_storage_provisioner/   # 角色: (DR用) 在DR集群部署PV/PVC
-│   └── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
+│   ├── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
+│   └── periodic_storage_sync/    # 角色: (周期性任务用) 遍历并同步所有存储资源
 └── playbooks/
     ├── event_driven/
     │   ├── handle_nfs_pv_sync.yml    # Playbook: (EDA用) 调用nfs_sync_on_event
     │   ├── handle_nfs_pv_delete.yml  # Playbook: (EDA用) 调用nfs_delete_on_event
     │   ├── handle_snapshot_sync.yml  # Playbook: (EDA用) 调用snapshot_sync_on_event
     │   └── handle_snapshot_delete.yml# Playbook: (EDA用) 调用snapshot_delete_on_event
-    └── manual_dr/
-        └── execute_failover.yml      # Playbook: (DR用) 执行完整的灾备切换
+    ├── manual_dr/
+    │   └── execute_failover.yml      # Playbook: (DR用) 执行完整的灾备切换
+    └── scheduled/
+        └── execute_periodic_sync.yml # Playbook: (周期性任务用) 执行完整的周期性同步
 ```
 ### **4\. 模式一：事件驱动数据复制逻辑详解**
 
@@ -199,7 +240,42 @@ ocp-v-dr-automation/
     2. 调用 `snapshot_delete_on_event` 角色。
     3. 角色逻辑：根据快照元数据，在灾备站点清理对应的记录或资源。
 
-### **5\. 模式二：手动灾备恢复逻辑详解**
+### **5\. 模式二：周期性主动同步逻辑详解**
+
+此流程通过 AAP 的调度功能（Scheduler）定时触发，例如每小时执行一次，作为对事件驱动模式的补充和校验。
+
+*   **Playbook**: `playbooks/scheduled/execute_periodic_sync.yml`
+*   **核心角色**: `roles/periodic_storage_sync`
+
+#### **流程详解**:
+
+1.  **获取所有相关资源**:
+    *   连接到主 OpenShift 集群 (`ocp_primary`)。
+    *   使用 `k8s_info` 模块获取所有 `storageClassName` 为 `nfs-dynamic` 的 `PersistentVolume` 列表。
+    *   使用 `k8s_info` 模块获取所有 `VolumeSnapshot` 列表。
+
+2.  **遍历并同步 PV**:
+    *   在 Playbook 中，使用 `loop` 循环遍历获取到的 PV 列表。
+    *   对于每一个 PV，调用 `periodic_storage_sync` 角色。
+    *   **角色逻辑 (`periodic_storage_sync`)**:
+        *   **输入**: 单个 `pv_object`。
+        *   **构造路径**: 从 `pv_object.spec.nfs.path` 提取源路径。目标路径可以基于源路径在灾备 NFS 服务器上生成。
+        *   **执行同步**: `delegate_to` 到灾备 NFS 服务器 (`dr_nfs_server`)，执行 `rsync -av --delete` 命令，确保灾备端与主站点的目录完全一致。
+        *   **记录日志**: 记录每个 PV 的同步状态（成功、失败、差异）。
+
+3.  **遍历并同步 VolumeSnapshot**:
+    *   同样使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
+    *   对于每一个快照，调用 `periodic_storage_sync` 角色（或一个专门处理快照的独立角色）。
+    *   **角色逻辑**:
+        *   **输入**: 单个 `snapshot_object`。
+        *   **同步元数据**: 确保快照的元数据（例如创建时间、关联的 PV 等）在灾备站点的记录库中是最新的。
+        *   **（可选）同步快照数据**: 如果底层存储支持基于快照的增量同步，则触发相应的同步命令。对于 NFS，这通常意味着同步与快照关联的特定数据目录。
+
+4.  **生成报告**:
+    *   在 Playbook 的最后，汇总所有资源的同步结果。
+    *   生成一个简明的报告，指出哪些资源同步成功，哪些失败，以及发现的数据不一致情况。此报告可以通过邮件、Webhook 等方式通知管理员。
+
+### **6\. 模式三：手动灾备恢复逻辑详解**
 
 此流程由管理员在灾难发生后，通过 AAP 手动启动一个 Workflow Template 来执行。
 
@@ -267,15 +343,17 @@ ocp-v-dr-automation/
     3.  **生成报告**:
         *   记录灾备切换的时间、持续时间、成功或失败状态以及任何关键信息。
 
-### **6\. AAP 平台配置**
+### **7\. AAP 平台配置**
 
 1. **EDA Controller 配置**:  
    * 创建一个项目（Project）指向包含 rulebooks/ 目录的 Git 仓库。  
    * 配置一个 Decision Environment（通常使用默认的）。  
    * 创建一个 Rulebook Activation，关联项目和 ocp_dr_events.yml 规则手册，并启动它。  
    * **重要**: 在 Rulebook Activation 中，需要将 Webhook 的 URL 和认证 Token 作为环境变量传递给 `k8s_event_forwarder.py` 的 Deployment。
-2. **Workflow 配置**:  
-   * 创建两个 Job Template，分别对应 EDA 触发的 handle_nfs_pv_sync.yml 和 handle_nfs_pv_delete.yml。  
-   * 创建一个 "一键灾备切换" Workflow Template，关联 manual_dr/execute_failover.yml Playbook，并配置调查问卷以接收 backup_name。
+2. **Workflow 与调度配置**:  
+   * **事件驱动 Job Templates**: 创建 Job Template，分别对应 EDA 触发的 `handle_nfs_pv_sync.yml`, `handle_nfs_pv_delete.yml` 等 Playbook。
+   * **周期性同步 Job Template**: 创建一个 Job Template，关联 `scheduled/execute_periodic_sync.yml` Playbook。
+     * 在此 Job Template 上配置一个 **Schedule**，设置 CRON 表达式（例如 `0 * * * *` 表示每小时执行一次）。
+   * **手动恢复 Workflow Template**: 创建一个 "一键灾备切换" Workflow Template，关联 `manual_dr/execute_failover.yml` Playbook，并配置调查问卷以接收 `backup_name`。
 
-通过此番设计，您的灾备方案将提升到一个新的水平，实现了数据同步的自动化和实时性，同时保留了灾备恢复过程的严谨性和可控性。
+通过此番设计，您的灾备方案将提升到一个新的水平，实现了数据同步的自动化和实时性，通过周期性校验保障了最终一致性，同时保留了灾备恢复过程的严谨性和可控性。
