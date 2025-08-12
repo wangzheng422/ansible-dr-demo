@@ -80,7 +80,7 @@ ocp-v-dr-automation/
 
 #### 流程 3-4: AAP EDA Rulebook 与逻辑分发
 
-* **文件**: rulebooks/ocp\_pv\_listener.yml  
+* **文件**: rulebooks/ocp_pv_listener.yml  
 * **逻辑设计**:
 ```yaml
 ---
@@ -156,7 +156,7 @@ ocp-v-dr-automation/
 
 #### 流程 1-3: 查找并解析备份
 
-*   **角色: oadp\_backup\_parser**
+*   **角色: oadp_backup_parser**
     1.  **输入**: 由 AAP 调查问卷（Survey）提供要恢复的 `backup_name` (如果为空，则自动查找最新的)。
     2.  在 `localhost` 上执行。
     3.  从 S3 下载指定的 OADP 备份包。
@@ -172,7 +172,7 @@ ocp-v-dr-automation/
 
 #### 流程 6: 在 DR OCP 上部署存储
 
-*   **角色: dr\_storage\_provisioner**
+*   **角色: dr_storage_provisioner**
     1.  **输入**: `pv_info_list` 和 `pvc_info_list`。
     2.  连接到灾备 OCP 集群 (`ocp_dr`)。
     3.  循环遍历 `pv_info_list`，动态生成新的 PV 定义。**关键修改**: 更新 `spec.nfs.server` 为灾备 NFS 服务器 IP，并根据灾备站点的存储布局调整 `spec.nfs.path`。然后将修改后的 PV 定义 `apply` 到灾备集群。
@@ -180,7 +180,7 @@ ocp-v-dr-automation/
 
 #### 7. 在 DR OCP 上恢复应用
 
-*   **角色: oadp\_restore\_trigger**
+*   **角色: oadp_restore_trigger**
     1.  **输入**: `backup_name`。
     2.  连接到灾备 OCP 集群 (`ocp_dr`)。
     3.  动态生成 Restore 对象，`spec.backupName` 设置为输入的 `backup_name`，并且 `excludedResources` 必须包含 `persistentvolumes` 和 `persistentvolumeclaims`。
@@ -205,9 +205,9 @@ ocp-v-dr-automation/
 1. **EDA Controller 配置**:  
    * 创建一个项目（Project）指向包含 rulebooks/ 目录的 Git 仓库。  
    * 配置一个 Decision Environment（通常使用默认的）。  
-   * 创建一个 Rulebook Activation，关联项目和 ocp\_pv\_listener.yml 规则手册，并启动它。  
+   * 创建一个 Rulebook Activation，关联项目和 ocp_pv_listener.yml 规则手册，并启动它。  
 2. **Workflow 配置**:  
-   * 创建两个 Job Template，分别对应 EDA 触发的 handle\_nfs\_pv\_sync.yml 和 handle\_nfs\_pv\_delete.yml。  
-   * 创建一个 "一键灾备切换" Workflow Template，关联 manual\_dr/execute\_failover.yml Playbook，并配置调查问卷以接收 backup\_name。
+   * 创建两个 Job Template，分别对应 EDA 触发的 handle_nfs_pv_sync.yml 和 handle_nfs_pv_delete.yml。  
+   * 创建一个 "一键灾备切换" Workflow Template，关联 manual_dr/execute_failover.yml Playbook，并配置调查问卷以接收 backup_name。
 
 通过此番设计，您的灾备方案将提升到一个新的水平，实现了数据同步的自动化和实时性，同时保留了灾备恢复过程的严谨性和可控性。
