@@ -1,6 +1,18 @@
 ---
 - name: Listen for OCP Persistent Volume Changes (Debug)
   hosts: localhost
+
+  # This pre_tasks block will run before any event sources start
+  pre_tasks:
+    - name: Print debug information before starting source
+      ansible.builtin.debug:
+        msg:
+          - "Attempting to connect to host: {{ lookup('env', 'K8S_HOST') }}"
+          - "API Key starts with: {{ (lookup('env', 'K8S_API_KEY', default=''))[:10] }}..."
+          - "API Key length: {{ (lookup('env', 'K8S_API_KEY', default='')) | length }}"
+          - "HTTPS_PROXY is: {{ lookup('env', 'HTTPS_PROXY', default='Not Set') }}"
+          - "NO_PROXY is: {{ lookup('env', 'NO_PROXY', default='Not Set') }}"
+
   sources:
       - sabre1041.eda.k8s:
           api_key: "{{ k8s_api_key }}" # Added for API authentication
