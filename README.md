@@ -59,11 +59,9 @@ python3 -m venv eda-env
 
 source ~/venv/eda-env/bin/activate
 
-pip install ansible-rulebook ansible-core 
+pip install ansible-rulebook ansible-core requests kubernetes
 
 ansible-galaxy collection install sabre1041.eda ansible.eda
-
-pip install requests kubernetes
 
 sudo dnf install -y java-17-openjdk-devel
 

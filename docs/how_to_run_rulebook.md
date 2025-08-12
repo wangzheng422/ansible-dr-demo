@@ -40,6 +40,46 @@ Let's use the `ocp_pv_listener_debug.yml` rulebook as an example. This rulebook 
     ansible-rulebook --rulebook rulebooks/ocp_pv_listener_debug.yml --verbose
     ```
 
+### Passing Extra Variables
+
+Some rulebooks, like `ocp_pv_listener_debug.yml`, require external variables to be passed for things like API keys or hostnames. You can pass these using the `--vars` flag, pointing to a file, or with `--extra-vars` for inline key-value pairs.
+
+**Example: Passing `k8s_host` and `k8s_api_key`**
+
+The `ocp_pv_listener_debug.yml` rulebook requires `k8s_host` and `k8s_api_key` to connect to the Kubernetes API.
+
+1.  **Using `--extra-vars`**:
+
+    You can pass the variables directly on the command line. This is useful for a small number of variables.
+
+    ```bash
+    ansible-rulebook \
+      --rulebook rulebooks/ocp_pv_listener_debug.yml \
+      --extra-vars '{"k8s_host": "https://api.your.openshift.cluster:6443", "k8s_api_key": "your_api_key_here"}' \
+      --verbose
+    ```
+
+    Replace `"https://api.your.openshift.cluster:6443"` and `"your_api_key_here"` with your actual OpenShift API server URL and a valid API token.
+
+2.  **Using a `--vars` file**:
+
+    For a more organized approach, especially with multiple variables, you can define them in a YAML file (e.g., `vars.yml`):
+
+    ```yaml
+    # vars.yml
+    k8s_host: "https://api.your.openshift.cluster:6443"
+    k8s_api_key: "your_api_key_here"
+    ```
+
+    Then, run the rulebook with the `--vars` flag:
+
+    ```bash
+    ansible-rulebook \
+      --rulebook rulebooks/ocp_pv_listener_debug.yml \
+      --vars vars.yml \
+      --verbose
+    ```
+
     **Explanation of the command:**
     *   `ansible-rulebook`: The command-line tool for running Ansible Rulebooks.
     *   `--rulebook rulebooks/ocp_pv_listener_debug.yml`: Specifies the path to your rulebook file.
