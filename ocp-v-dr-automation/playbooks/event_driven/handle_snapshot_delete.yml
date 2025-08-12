@@ -1,0 +1,6 @@
+---
+- name: Handle VolumeSnapshot Delete Event
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: snapshot_delete_on_event

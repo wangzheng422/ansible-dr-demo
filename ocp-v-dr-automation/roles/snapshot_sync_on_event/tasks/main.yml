@@ -1,0 +1,5 @@
+---
+# tasks file for snapshot_sync_on_event
+- name: "Debug snapshot_object"
+  ansible.builtin.debug:
+    var: snapshot_object

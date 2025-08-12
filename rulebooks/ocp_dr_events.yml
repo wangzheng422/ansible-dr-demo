@@ -1,0 +1,65 @@
+---
+- name: Process OCP DR Events from Webhook
+  hosts: localhost
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+        # 在 AAP 中，需要配置 token 来保护此 webhook
+        # token: "{{ eda_webhook_token }}"
+
+  rules:
+    # 规则 1: 处理 NFS PV 的创建和修改
+    - name: Handle NFS PV Create or Update
+      condition: >
+        event.kind == "PersistentVolume" and
+        (event.type == "ADDED" or event.type == "MODIFIED") and
+        event.resource.spec.storageClassName == "nfs-dynamic"
+      action:
+        run_job_template:
+          name: "EDA - Sync NFS PV to DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              pv_object: "{{ event.resource }}" # 转发器封装的完整PV对象
+
+    # 规则 2: 处理 NFS PV 的删除
+    - name: Handle NFS PV Deletion
+      condition: >
+        event.kind == "PersistentVolume" and
+        event.type == "DELETED" and
+        event.resource.spec.storageClassName == "nfs-dynamic"
+      action:
+        run_job_template:
+          name: "EDA - Delete NFS PV from DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              pv_object: "{{ event.resource }}"
+
+    # 规则 3: 处理 VolumeSnapshot 的创建
+    - name: Handle VolumeSnapshot Creation
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "ADDED" and
+        event.resource.status.readyToUse == true
+      action:
+        run_job_template:
+          name: "EDA - Sync VolumeSnapshot Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              snapshot_object: "{{ event.resource }}"
+
+    # 规则 4: 处理 VolumeSnapshot 的删除
+    - name: Handle VolumeSnapshot Deletion
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete VolumeSnapshot Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              snapshot_object: "{{ event.resource }}"

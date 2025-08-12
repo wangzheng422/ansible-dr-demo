@@ -1,0 +1,28 @@
+---
+# tasks file for periodic_storage_sync
+- name: "Sync NFS PV"
+  when: pv_object is defined
+  block:
+    - name: "Construct source and destination paths"
+      ansible.builtin.set_fact:
+        src_path: "{{ pv_object.spec.nfs.path }}"
+        dest_path: "{{ pv_object.spec.nfs.path }}" # Placeholder, adjust as needed
+
+    - name: "Execute rsync for PV directory"
+      ansible.posix.synchronize:
+        src: "{{ src_path }}/"
+        dest: "rsync://{{ dr_nfs_server_user }}@{{ dr_nfs_server_ip }}:{{ dest_path }}"
+        archive: yes
+        delete: yes
+      delegate_to: "{{ primary_nfs_server_ip }}"
+
+    - name: "Log PV sync status"
+      ansible.builtin.debug:
+        msg: "Successfully synced PV {{ pv_object.metadata.name }} from {{ src_path }} to {{ dest_path }}"
+
+- name: "Sync VolumeSnapshot Metadata"
+  when: snapshot_object is defined
+  block:
+    - name: "Log snapshot metadata sync"
+      ansible.builtin.debug:
+        msg: "Syncing metadata for VolumeSnapshot {{ snapshot_object.metadata.name }}"

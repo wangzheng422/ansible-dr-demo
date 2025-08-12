@@ -1,0 +1,6 @@
+---
+- name: Handle VolumeSnapshot Sync Event
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: snapshot_sync_on_event

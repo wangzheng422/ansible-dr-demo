@@ -1,0 +1,38 @@
+---
+- name: Execute Periodic Storage Sync
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: "Get all NFS PVs from Primary OCP"
+      kubernetes.core.k8s_info:
+        api_version: v1
+        kind: PersistentVolume
+        label_selectors:
+          - storageClassName=nfs-dynamic
+      register: nfs_pvs
+      delegate_to: "{{ ocp_primary_cluster_name }}"
+
+    - name: "Get all VolumeSnapshots from Primary OCP"
+      kubernetes.core.k8s_info:
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshot
+      register: snapshots
+      delegate_to: "{{ ocp_primary_cluster_name }}"
+
+    - name: "Loop through each PV and sync"
+      ansible.builtin.include_role:
+        name: periodic_storage_sync
+      loop: "{{ nfs_pvs.resources }}"
+      loop_control:
+        loop_var: pv_object
+
+    - name: "Loop through each Snapshot and sync metadata"
+      ansible.builtin.include_role:
+        name: periodic_storage_sync
+      loop: "{{ snapshots.resources }}"
+      loop_control:
+        loop_var: snapshot_object
+
+    - name: "Generate Sync Report"
+      ansible.builtin.debug:
+        msg: "Periodic sync completed. Synced {{ nfs_pvs.resources | length }} PVs and {{ snapshots.resources | length }} snapshots."

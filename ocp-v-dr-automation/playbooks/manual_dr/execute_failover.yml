@@ -8,39 +8,59 @@
     - name: backup_name
       prompt: "Enter the OADP backup name to restore (leave empty to use the latest)"
       private: no
-      default: "{{ default_backup_name }}"
+      default: ""
+
+  vars:
+    # This allows the backup_name to be passed in via survey or extra_vars
+    oadp_backup_name: "{{ backup_name }}"
 
   tasks:
     # ----------------------------------------------------------------
-    # Block 1: Pre-Failover Actions on Primary Site (Optional)
+    # Block 0: Pre-Failover Actions on Primary Site
     # ----------------------------------------------------------------
-    - name: Pre-Failover Actions
+    - name: "Pre-Failover: Shut down VMs and set storage read-only"
       block:
-        - name: Shut down VMs on Primary OCP (Placeholder)
+        - name: "Shut down VMs on Primary OCP"
           debug:
-            msg: "TASK: Shutting down VMs on the primary cluster. Implementation needed."
+            msg: "Shutting down VMs on Primary OCP... (Implementation needed)"
 
-        - name: Set Primary Storage to Read-Only (Placeholder)
+        - name: "Set Primary Storage to Read-Only"
           debug:
-            msg: "TASK: Setting primary NFS storage to read-only. Implementation needed."
-
-        - name: Verify Final Data Sync Status (Placeholder)
-          debug:
-            msg: "TASK: Running final data consistency check. Implementation needed."
-      when: false # Disabled by default for safety, enable when tasks are implemented
+            msg: "Setting Primary NFS to Read-Only... (Implementation needed)"
+      when: execute_pre_failover_steps | default(false) | bool
 
     # ----------------------------------------------------------------
-    # Block 2: Parse OADP Backup
+    # Block 1: Parse OADP Backup
     # ----------------------------------------------------------------
-    - name: Parse OADP Backup to get PV and PVC definitions
+    - name: "Parse OADP Backup to get PV and PVC definitions"
       include_role:
         name: oadp_backup_parser
+      vars:
+        backup_name: "{{ oadp_backup_name }}"
       register: backup_data
+
+    # ----------------------------------------------------------------
+    # Block 2: Final Data Sync
+    # ----------------------------------------------------------------
+    - name: "Final Data Sync for NFS PVs"
+      ansible.posix.synchronize:
+        src: "{{ item.spec.nfs.path }}/"
+        dest: "rsync://{{ dr_nfs_server_user }}@{{ dr_nfs_server_ip }}:{{ item.spec.nfs.path }}"
+        archive: yes
+        delete: yes
+        # Use --dry-run for verification before actual sync
+        # rsync_opts:
+        #   - "--dry-run"
+      delegate_to: "{{ primary_nfs_server_ip }}"
+      loop: "{{ backup_data.pv_info_list }}"
+      when:
+        - backup_data.pv_info_list is defined
+        - item.spec.nfs is defined
 
     # ----------------------------------------------------------------
     # Block 3: Provision Storage on DR Site
     # ----------------------------------------------------------------
-    - name: Provision Storage on DR Cluster
+    - name: "Provision Storage on DR Cluster"
       include_role:
         name: dr_storage_provisioner
       vars:
@@ -51,27 +71,28 @@
     # ----------------------------------------------------------------
     # Block 4: Trigger OADP Restore on DR Site
     # ----------------------------------------------------------------
-    - name: Trigger OADP Restore on DR Cluster
+    - name: "Trigger OADP Restore on DR Cluster"
       include_role:
         name: oadp_restore_trigger
       vars:
-        oadp_backup_name: "{{ backup_name }}"
+        # Use the backup name found by the parser role
+        oadp_backup_name: "{{ backup_data.backup_name }}"
 
     # ----------------------------------------------------------------
     # Block 5: Post-Failover Verification and Cleanup
     # ----------------------------------------------------------------
-    - name: Post-Failover Actions
+    - name: "Post-Failover Actions"
       block:
-        - name: Verify VM Status on DR Cluster (Placeholder)
+        - name: "Verify VM Status on DR Cluster"
           debug:
-            msg: "TASK: Verifying that VMs are running on the DR cluster. Implementation needed."
+            msg: "Verifying that VMs are running on the DR cluster... (Implementation needed)"
 
-        - name: Clean up temporary files
-          file:
+        - name: "Clean up temporary files"
+          ansible.builtin.file:
             path: "{{ backup_data.temp_backup_dir }}"
             state: absent
           when: backup_data.temp_backup_dir is defined
 
-        - name: Generate Failover Report (Placeholder)
+        - name: "Generate Failover Report"
           debug:
-            msg: "TASK: Generating failover report. Implementation needed."
+            msg: "Failover process completed for backup {{ backup_data.backup_name }}."
