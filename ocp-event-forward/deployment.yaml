@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eda-k8s-event-forwarder
+  namespace: eda # <--- 部署到您的EDA/AAP项目命名空间
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eda-k8s-event-forwarder
+  template:
+    metadata:
+      labels:
+        app: eda-k8s-event-forwarder
+    spec:
+      serviceAccountName: eda-k8s-watcher-sa # 使用我们上面创建的Service Account
+      containers:
+      - name: forwarder
+        image: quay.io/your-repo/eda-k8s-event-forwarder:latest # <--- 替换成您自己的镜像仓库地址
+        env:
+        - name: EDA_WEBHOOK_URL
+          value: "http://your-eda-webhook-url:port" # <--- 替换成AAP EDA提供的Webhook URL
