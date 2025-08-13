@@ -11,9 +11,10 @@
     - name: "Execute rsync for the PV directory"
       ansible.posix.synchronize:
         src: "{{ pv_object.spec.nfs.path }}/"
-        dest: "rsync://{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ pv_object.spec.nfs.path }}"
+        dest: "{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ pv_object.spec.nfs.path }}"
         archive: yes
         delete: yes
+        use_ssh_args: yes
         # Make sure to use the correct host that can access the source path
       delegate_to: "{{ primary_nfs_server }}"
 

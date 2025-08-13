@@ -60,7 +60,7 @@ graph TD
         B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
         C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
         D --> E{Loop through each PV/PVC};
-        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS<br>2. Modify PV spec<br>3. Apply PV/PVC to DR OCP];
+        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS via SSH<br>2. Modify PV spec<br>3. Apply PV/PVC to DR OCP];
         D --> G{Loop through each VS/VSC};
         G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data];
         C --> I[Log Results & Generate Report];
@@ -94,7 +94,7 @@ graph TD
     K --> L[Optional: Set Primary Storage Read-Only];
     L --> M[Download OADP Backup from S3];
     M --> N[Parse PV/PVC Definitions];
-    N --> O[Final Data Sync<br>rsync on DR NFS Server];
+    N --> O[Final Data Sync<br>rsync via SSH on DR NFS Server];
     O --> P[Apply Modified PVs/PVCs to DR OCP];
     P --> Q[Apply OADP Restore<br>exclude PV/PVC];
     Q --> R[Verify VM Status on DR OCP];

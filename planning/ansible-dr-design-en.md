@@ -56,7 +56,7 @@ graph TD
         B --> C[Playbook: execute_periodic_sync.yml];
         C --> D[Get All PVs & Snapshots<br>from Primary OCP];
         D --> E{Loop through each PV};
-        E -- NFS PV --> F[Role: periodic_storage_sync<br>Execute rsync for PV directory];
+        E -- NFS PV --> F[Role: periodic_storage_sync<br>Execute rsync for PV directory via SSH];
         D --> G{Loop through each Snapshot};
         G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata];
         C --> I[Log Results & Generate Report];
@@ -88,7 +88,7 @@ graph TD
     K --> L[Optional: Set Primary Storage Read-Only];
     L --> M[Download OADP Backup from S3];
     M --> N[Parse PV/PVC Definitions];
-    N --> O[Final Data Sync<br>rsync on DR NFS Server];
+    N --> O[Final Data Sync<br>rsync via SSH on DR NFS Server];
     O --> P[Apply Modified PVs/PVCs to DR OCP];
     P --> Q[Apply OADP Restore<br>exclude PV/PVC];
     Q --> R[Verify VM Status on DR OCP];
