@@ -93,6 +93,9 @@
     ```
     在这个Playbook中，`ocp_primary_cluster_name` 变量是必需的，因为它用于 `delegate_to`。虽然它没有在当前的 `group_vars/all.yml` 中，但通常会在这里或通过命令行定义。
 
+**关于 `group_vars/all.yml` 的自动引用**:
+Ansible 会自动加载 `group_vars/all.yml` 文件中定义的所有变量，并使其对清单中的所有主机可用。您无需在 `ansible-playbook` 命令中显式引用它。这意味着，只要变量在 `group_vars/all.yml` 中定义，Playbook 就可以直接使用它们。
+
 ### 2.3. 总结
 
 *   **Inventory (清单)**: 定义 **“在哪里”** 运行Ansible任务（主机和主机组）。
@@ -207,3 +210,13 @@ Ansible提供了多种调试选项：
     ```
 
 通过结合使用这些工具和技术，您可以有效地运行和调试 `execute_periodic_sync.yml` Ansible Playbook。
+
+```bash
+
+cd ~/git/ansible-dr-demo/ocp-v-dr-automation
+
+ansible-playbook -i inventory/hosts.ini \
+  playbooks/scheduled/execute_periodic_sync.yml \
+  -e "ocp_primary_cluster_name=primary-cluster.example.com" -vvv
+
+```

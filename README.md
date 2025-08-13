@@ -110,7 +110,10 @@ metadata:
   name: eda-pv-event-reader
 rules:
 - apiGroups: [""] # Core API group
-  resources: ["persistentvolumes"]
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["snapshot.storage.k8s.io"]
+  resources: ["volumesnapshots", "volumesnapshotcontents"]
   verbs: ["get", "list", "watch"]
 EOF
 
@@ -137,4 +140,3 @@ echo $SA_TOKEN
 ## config app
 
 <img src="imgs/README.md/2025-08-12-11-40-26.png" width="1024">
-
