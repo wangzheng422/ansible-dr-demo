@@ -57,7 +57,7 @@ graph TD
     end
 
     subgraph Ansible Execution
-        B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: ['ns1', 'ns2']];
+        B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
         C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
         D --> E{Loop through each PV/PVC};
         E -- NFS based --> F[Role: periodic_storage_sync<br>Execute rsync for data];
