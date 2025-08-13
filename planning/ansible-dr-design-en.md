@@ -260,7 +260,7 @@ This process is triggered periodically by AAP's scheduling function (Scheduler),
     *   **Role Logic (`periodic_storage_sync`)**:
         *   **Input**: A single `pv_object`.
         *   **Construct Path**: Extract the source path from `pv_object.spec.nfs.path`. The destination path can be generated on the DR NFS server based on the source path.
-        *   **Execute Sync**: `delegate_to` the DR NFS server (`dr_nfs_server`), execute the `rsync -av --delete` command to ensure the DR side is completely consistent with the primary site's directory.
+        *   **Execute Sync**: `delegate_to` the DR NFS server (`dr_nfs_server`), execute the `rsync -av --delete` command to ensure the DR side is completely consistent with the primary site's directory. **Note**: This requires that passwordless SSH access (using keys) is configured from the primary NFS server to the DR NFS server.
         *   **Log Results**: Record the synchronization status of each PV (success, failure, discrepancy).
 
 3.  **Iterate and synchronize VolumeSnapshots**:
@@ -311,6 +311,7 @@ This process is manually initiated by an administrator after a disaster, by laun
     2.  **Logic Distribution**: Use `when` conditions or `include_role`'s `when` clause to decide which storage type's validation logic to execute based on `item.spec.storageClassName`.
     3.  **NFS Validation**: **On the DR site's NFS server (`delegate_to: dr_nfs_server`)** perform final data synchronization. Based on the path information in `pv_info_list`, construct an `rsync` command to pull data from the primary NFS server to the DR NFS server. This is a critical step to ensure eventual data consistency.
         *   **Command Example**: `rsync -av --delete user@primary-nfs:/path/to/data/ /path/to/dr/data/`
+        *   **Note**: This requires that passwordless SSH access (using keys) is configured from the DR NFS server to the primary NFS server.
         *   Before performing the actual restore, you can first run `rsync --dry-run` for a check, and if inconsistencies are found, a warning message can be printed.
 
 #### Process 6: Deploy Storage on DR OCP

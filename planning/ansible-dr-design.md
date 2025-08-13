@@ -327,7 +327,7 @@ ocp-v-dr-automation/
     *   调用 `periodic_storage_sync` 角色，传入 PVC 和 PV 对象。
     *   **角色逻辑 (`periodic_storage_sync`)**:
         *   **输入**: `pvc_object` 和 `pv_object`。
-        *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。
+        *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。**注意**: 此操作要求主 NFS 服务器 (`primary_nfs_server`) 与灾备 NFS 服务器 (`dr_nfs_server`) 之间已配置好基于密钥的 SSH 免密登录。
         *   **第二步：修改并应用 PV**:
             *   在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。
             *   使用 `kubernetes.core.k8s` 模块，通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 变量连接到灾备 OpenShift 集群 (`ocp_dr`)，然后将修改后的 PV 定义 `apply` 到该集群。
@@ -385,6 +385,7 @@ ocp-v-dr-automation/
     2.  **逻辑分发**: 使用 `when` 条件或 `include_role` 的 `when` 子句，根据 `item.spec.storageClassName` 来决定执行哪个存储类型的验证逻辑。
     3.  **NFS 验证**: **在灾备站点的 NFS 服务器上 (`delegate_to: dr_nfs_server`)** 执行最终数据同步。根据 `pv_info_list` 中的路径信息，构造 `rsync` 命令，将主 NFS 服务器的数据拉取到灾备 NFS 服务器。这是确保数据最终一致性的关键一步。
         *   **命令示例**: `rsync -av --delete user@primary-nfs:/path/to/data/ /path/to/dr/data/`
+        *   **注意**: 此操作要求灾备 NFS 服务器 (`dr_nfs_server`) 与主 NFS 服务器 (`primary_nfs_server`) 之间已配置好基于密钥的 SSH 免密登录。
         *   在执行实际恢复前，可以先运行 `rsync --dry-run` 进行检查，如果不一致，可以打印警告信息。
 
 #### 流程 6: 在 DR OCP 上部署存储
