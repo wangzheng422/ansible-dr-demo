@@ -2,41 +2,86 @@
 - name: Execute Periodic Storage Sync
   hosts: localhost
   gather_facts: false
+
+  vars:
+    # Define the list of namespaces to sync. This can be overridden by extra-vars.
+    target_namespaces:
+      - "default"
+      - "app-ns1"
+
   tasks:
-    - name: "Get all NFS PVs from Primary OCP"
+    - name: "Get all PersistentVolumeClaims from target namespaces"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_primary_api_server }}"
+        api_key: "{{ ocp_primary_api_key }}"
+        validate_certs: false
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ item }}"
+      loop: "{{ target_namespaces }}"
+      register: pvc_results
+
+    - name: "Flatten the list of PVCs"
+      ansible.builtin.set_fact:
+        all_pvcs: "{{ pvc_results.results | map(attribute='resources') | flatten }}"
+
+    - name: "Get all PersistentVolumes from Primary OCP"
       kubernetes.core.k8s_info:
         host: "{{ ocp_primary_api_server }}"
         api_key: "{{ ocp_primary_api_key }}"
         validate_certs: false
         api_version: v1
         kind: PersistentVolume
-        label_selectors:
-          - storageClassName=nfs-dynamic
-      register: nfs_pvs
+      register: all_pvs
 
-    - name: "Get all VolumeSnapshots from Primary OCP"
+    - name: "Get all VolumeSnapshots from target namespaces"
       kubernetes.core.k8s_info:
         host: "{{ ocp_primary_api_server }}"
         api_key: "{{ ocp_primary_api_key }}"
         validate_certs: false
         api_version: snapshot.storage.k8s.io/v1
         kind: VolumeSnapshot
-      register: snapshots
+        namespace: "{{ item }}"
+      loop: "{{ target_namespaces }}"
+      register: vs_results
 
-    - name: "Loop through each PV and sync"
+    - name: "Flatten the list of VolumeSnapshots"
+      ansible.builtin.set_fact:
+        all_snapshots: "{{ vs_results.results | map(attribute='resources') | flatten }}"
+
+    - name: "Get all VolumeSnapshotContents from Primary OCP"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_primary_api_server }}"
+        api_key: "{{ ocp_primary_api_key }}"
+        validate_certs: false
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshotContent
+      register: all_vscs
+
+    - name: "Loop through each PVC and sync its PV"
       ansible.builtin.include_role:
         name: periodic_storage_sync
-      loop: "{{ nfs_pvs.resources }}"
+      vars:
+        pvc_object: "{{ item }}"
+        # Find the PV that is bound to this PVC
+        pv_object: "{{ all_pvs.resources | selectattr('metadata.name', 'equalto', item.spec.volumeName) | first }}"
+      loop: "{{ all_pvcs }}"
       loop_control:
-        loop_var: pv_object
+        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+      when: item.spec.volumeName is defined
 
-    - name: "Loop through each Snapshot and sync metadata"
+    - name: "Loop through each VolumeSnapshot and sync its Content"
       ansible.builtin.include_role:
         name: periodic_storage_sync
-      loop: "{{ snapshots.resources }}"
+      vars:
+        snapshot_object: "{{ item }}"
+        # Find the VSC that is bound to this VolumeSnapshot
+        content_object: "{{ all_vscs.resources | selectattr('metadata.name', 'equalto', item.status.boundVolumeSnapshotContentName) | first }}"
+      loop: "{{ all_snapshots }}"
       loop_control:
-        loop_var: snapshot_object
+        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+      when: item.status is defined and item.status.boundVolumeSnapshotContentName is defined and item.status.readyToUse | default(false)
 
     - name: "Generate Sync Report"
       ansible.builtin.debug:
-        msg: "Periodic sync completed. Synced {{ nfs_pvs.resources | length }} PVs and {{ snapshots.resources | length }} snapshots."
+        msg: "Periodic sync completed. Synced {{ all_pvcs | length }} PVCs and {{ all_snapshots | length }} snapshots from namespaces [{{ target_namespaces | join(', ') }}]."

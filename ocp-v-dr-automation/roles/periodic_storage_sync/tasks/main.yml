@@ -1,28 +1,51 @@
 ---
 # tasks file for periodic_storage_sync
-- name: "Sync NFS PV"
-  when: pv_object is defined
-  block:
-    - name: "Construct source and destination paths"
-      ansible.builtin.set_fact:
-        src_path: "{{ pv_object.spec.nfs.path }}"
-        dest_path: "{{ pv_object.spec.nfs.path }}" # Placeholder, adjust as needed
 
-    - name: "Execute rsync for PV directory"
+- name: "Sync data for a PersistentVolumeClaim"
+  when: pvc_object is defined and pv_object is defined and pv_object.spec.nfs.path is defined
+  block:
+    - name: "Log PV and PVC info"
+      ansible.builtin.debug:
+        msg: "Starting sync for PVC {{ pvc_object.metadata.namespace }}/{{ pvc_object.metadata.name }} -> PV {{ pv_object.metadata.name }}"
+
+    - name: "Execute rsync for the PV directory"
       ansible.posix.synchronize:
-        src: "{{ primary_nfs_base_path }}/"
-        dest: "rsync://{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ dr_nfs_base_path }}"
+        src: "{{ pv_object.spec.nfs.path }}/"
+        dest: "rsync://{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ pv_object.spec.nfs.path }}"
         archive: yes
         delete: yes
+        # Make sure to use the correct host that can access the source path
       delegate_to: "{{ primary_nfs_server }}"
+
+    - name: "Sync PVC and PV metadata to DR metadata store"
+      ansible.builtin.copy:
+        content: "{{ item.content | to_nice_yaml }}"
+        dest: "{{ dr_metadata_path }}/{{ item.kind }}-{{ item.name }}.yml"
+      loop:
+        - { name: "{{ pvc_object.metadata.name }}", content: "{{ pvc_object }}", kind: "pvc" }
+        - { name: "{{ pv_object.metadata.name }}", content: "{{ pv_object }}", kind: "pv" }
+      delegate_to: localhost
 
     - name: "Log PV sync status"
       ansible.builtin.debug:
-        msg: "Successfully synced PV {{ pv_object.metadata.name }} from {{ src_path }} to {{ dest_path }}"
+        msg: "Successfully synced PV {{ pv_object.metadata.name }} and its metadata."
 
-- name: "Sync VolumeSnapshot Metadata"
-  when: snapshot_object is defined
+- name: "Sync metadata for a VolumeSnapshot"
+  when: snapshot_object is defined and content_object is defined
   block:
-    - name: "Log snapshot metadata sync"
+    - name: "Log VolumeSnapshot and VolumeSnapshotContent info"
       ansible.builtin.debug:
-        msg: "Syncing metadata for VolumeSnapshot {{ snapshot_object.metadata.name }}"
+        msg: "Starting metadata sync for VS {{ snapshot_object.metadata.namespace }}/{{ snapshot_object.metadata.name }} -> VSC {{ content_object.metadata.name }}"
+
+    - name: "Sync VS and VSC metadata to DR metadata store"
+      ansible.builtin.copy:
+        content: "{{ item.content | to_nice_yaml }}"
+        dest: "{{ dr_metadata_path }}/{{ item.kind }}-{{ item.name }}.yml"
+      loop:
+        - { name: "{{ snapshot_object.metadata.name }}", content: "{{ snapshot_object }}", kind: "vs" }
+        - { name: "{{ content_object.metadata.name }}", content: "{{ content_object }}", kind: "vsc" }
+      delegate_to: localhost
+
+    - name: "Log snapshot metadata sync status"
+      ansible.builtin.debug:
+        msg: "Successfully synced metadata for VolumeSnapshot {{ snapshot_object.metadata.name }} and its content."
