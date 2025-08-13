@@ -219,4 +219,14 @@ ansible-playbook -i inventory/hosts.ini \
   playbooks/scheduled/execute_periodic_sync.yml \
   -e "ocp_primary_cluster_name=primary-cluster.example.com" -vvv
 
+
+cd ~/git/ansible-dr-demo/ocp-v-dr-automation
+
+ansible-playbook -i inventory/hosts.ini \
+playbooks/scheduled/execute_periodic_sync.yml \
+-e @group_vars/all.yml \
+-e "ocp_primary_cluster_name=primary-cluster.example.com" -vvv
+
+
+
 ```

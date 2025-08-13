@@ -17,18 +17,25 @@
         # Make sure to use the correct host that can access the source path
       delegate_to: "{{ primary_nfs_server }}"
 
-    - name: "Sync PVC and PV metadata to DR metadata store"
-      ansible.builtin.copy:
-        content: "{{ item.content | to_nice_yaml }}"
-        dest: "{{ dr_metadata_path }}/{{ item.kind }}-{{ item.name }}.yml"
-      loop:
-        - { name: "{{ pvc_object.metadata.name }}", content: "{{ pvc_object }}", kind: "pvc" }
-        - { name: "{{ pv_object.metadata.name }}", content: "{{ pv_object }}", kind: "pv" }
+    - name: "Modify PV definition for DR"
+      ansible.builtin.set_fact:
+        dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': pv_object.spec.nfs.path}}}, recursive=True) }}"
+
+    - name: "Create or Update PV on DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ dr_pv_object }}"
       delegate_to: localhost
 
-    - name: "Log PV sync status"
+    - name: "Create or Update PVC on DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ pvc_object }}"
+      delegate_to: localhost
+
+    - name: "Log PV and PVC sync status"
       ansible.builtin.debug:
-        msg: "Successfully synced PV {{ pv_object.metadata.name }} and its metadata."
+        msg: "Successfully synced and provisioned PV {{ pv_object.metadata.name }} and PVC {{ pvc_object.metadata.name }} on DR cluster."
 
 - name: "Sync metadata for a VolumeSnapshot"
   when: snapshot_object is defined and content_object is defined

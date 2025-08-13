@@ -60,14 +60,15 @@ graph TD
         B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
         C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
         D --> E{Loop through each PV/PVC};
-        E -- NFS based --> F[Role: periodic_storage_sync<br>Execute rsync for data];
+        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS<br>2. Modify PV spec<br>3. Apply PV/PVC to DR OCP];
         D --> G{Loop through each VS/VSC};
         G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data];
         C --> I[Log Results & Generate Report];
     end
 
-    subgraph Storage
-        F --> J[DR Storage];
+    subgraph "DR Infrastructure"
+        F --> J[DR NFS Storage];
+        F --> L[DR OCP Cluster];
         H --> K[DR Metadata Store];
     end
 
@@ -82,6 +83,7 @@ graph TD
     style I fill:#e6f7ff,stroke:#333,stroke-width:2px
     style J fill:#d4edda,stroke:#333,stroke-width:2px
     style K fill:#d4edda,stroke:#333,stroke-width:2px
+    style L fill:#d4edda,stroke:#333,stroke-width:2px
 ```
 
 **模式三: 手动灾备恢复 (Manual Failover)**
@@ -319,16 +321,20 @@ ocp-v-dr-automation/
     *   使用 `k8s_info` 模块，遍历 `target_namespaces` 列表，获取每个命名空间下的 `PersistentVolumeClaim` 和 `VolumeSnapshot` 列表。
     *   使用 `k8s_info` 模块获取所有相关的 `PersistentVolume` 和 `VolumeSnapshotContent` 列表（这些是非命名空间资源，但可以通过关联的 PVC 和 VolumeSnapshot 进行筛选）。
 
-2.  **遍历并同步 PVC/PV**:
+2.  **遍历并同步 PVC/PV (Warm Standby)**:
     *   在 Playbook 中，使用 `loop` 循环遍历获取到的 PVC 列表。
     *   对于每一个 PVC，找到其绑定的 PV (`spec.volumeName`)。
     *   调用 `periodic_storage_sync` 角色，传入 PVC 和 PV 对象。
     *   **角色逻辑 (`periodic_storage_sync`)**:
         *   **输入**: `pvc_object` 和 `pv_object`。
-        *   **构造路径**: 从 `pv_object.spec.nfs.path` 或其他存储类型的定义中提取源路径。
-        *   **执行同步**: `delegate_to` 到灾备存储端，执行 `rsync` 或其他同步命令。
-        *   **同步元数据**: 将 PVC 的定义（YAML/JSON）也同步到灾备端的元数据存储中，以备恢复时使用。
-        *   **记录日志**: 记录每个 PVC/PV 的同步状态。
+        *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。
+        *   **第二步：修改并应用 PV**:
+            *   在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。
+            *   使用 `kubernetes.core.k8s` 模块，将修改后的 PV 定义 `apply` 到灾备 OpenShift 集群 (`ocp_dr`)。
+        *   **第三步：应用 PVC**:
+            *   使用 `kubernetes.core.k8s` 模块，将原始的 `pvc_object` 定义 `apply` 到灾备 OpenShift 集群的目标命名空间中。
+        *   **记录日志**: 记录每个 PV 和 PVC 在灾备集群上的部署状态。
+        *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
 
 3.  **遍历并同步 VolumeSnapshot/VolumeSnapshotContent**:
     *   同样使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
