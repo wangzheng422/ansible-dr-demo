@@ -8,10 +8,14 @@
       ansible.builtin.debug:
         msg: "Starting sync for PVC {{ pvc_object.metadata.namespace }}/{{ pvc_object.metadata.name }} -> PV {{ pv_object.metadata.name }}"
 
+    - name: "Calculate DR PV path by replacing the base path"
+      ansible.builtin.set_fact:
+        dr_pv_path: "{{ pv_object.spec.nfs.path | regex_replace('^' + primary_nfs_base_path, dr_nfs_base_path) }}"
+
     - name: "Execute rsync for the PV directory"
       ansible.posix.synchronize:
         src: "{{ pv_object.spec.nfs.path }}/"
-        dest: "{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ pv_object.spec.nfs.path }}"
+        dest: "{{ dr_nfs_server_user }}@{{ dr_nfs_server }}:{{ dr_pv_path }}"
         archive: yes
         delete: yes
         use_ssh_args: yes
@@ -20,7 +24,7 @@
 
     - name: "Modify PV definition for DR"
       ansible.builtin.set_fact:
-        dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': pv_object.spec.nfs.path}}}, recursive=True) }}"
+        dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': dr_pv_path}}}, recursive=True) }}"
 
     - name: "Create or Update PV on DR cluster"
       kubernetes.core.k8s:
