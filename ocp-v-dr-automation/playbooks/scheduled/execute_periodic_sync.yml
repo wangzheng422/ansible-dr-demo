@@ -5,19 +5,23 @@
   tasks:
     - name: "Get all NFS PVs from Primary OCP"
       kubernetes.core.k8s_info:
+        host: "{{ ocp_primary_api_server }}"
+        api_key: "{{ ocp_primary_api_key }}"
+        validate_certs: false
         api_version: v1
         kind: PersistentVolume
         label_selectors:
           - storageClassName=nfs-dynamic
       register: nfs_pvs
-      delegate_to: "{{ ocp_primary_cluster_name }}"
 
     - name: "Get all VolumeSnapshots from Primary OCP"
       kubernetes.core.k8s_info:
+        host: "{{ ocp_primary_api_server }}"
+        api_key: "{{ ocp_primary_api_key }}"
+        validate_certs: false
         api_version: snapshot.storage.k8s.io/v1
         kind: VolumeSnapshot
       register: snapshots
-      delegate_to: "{{ ocp_primary_cluster_name }}"
 
     - name: "Loop through each PV and sync"
       ansible.builtin.include_role:
