@@ -3,12 +3,6 @@
   hosts: localhost
   gather_facts: false
 
-  vars:
-    # Define the list of namespaces to sync. This can be overridden by extra-vars.
-    target_namespaces:
-      - "default"
-      - "app-ns1"
-
   tasks:
     - name: "Get all PersistentVolumeClaims from target namespaces"
       kubernetes.core.k8s_info:
