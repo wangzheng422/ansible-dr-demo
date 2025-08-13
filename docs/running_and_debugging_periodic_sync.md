@@ -115,87 +115,35 @@ ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
 *   `ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml`: 指定要运行的Playbook文件。
 *   `-e "ocp_primary_cluster_name=primary-cluster.example.com"`: 通过命令行传递 `ocp_primary_cluster_name` 变量。请根据您的实际Primary OCP集群主机名进行替换。
 
-## 4. 调试Playbook
+### 3.1. 在启动时覆盖变量
 
-Ansible提供了多种调试选项：
+当您需要临时更改在变量文件（如 `group_vars/all.yml`）中定义的变量时，您可以在运行 `ansible-playbook` 命令时通过 `-e` 或 `--extra-vars` 参数来传递新值。通过命令行传递的变量具有较高的优先级，会覆盖清单变量文件中的同名变量。
 
-*   **详细输出 (`-v`, `-vv`, `-vvv`, `-vvvv`)**: 增加详细程度以查看更多执行细节。
-    *   `-v`: 少量详细信息。
-    *   `-vv`: 中等详细信息。
-    *   `-vvv`: 更多详细信息，包括模块参数。
-    *   `-vvvv`: 调试级别，显示连接和传输信息。
-    ```bash
-    ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
-      ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-      -e "ocp_primary_cluster_name=primary-cluster.example.com" -vvv
-    ```
+这对于测试、针对不同环境进行微调或动态传递配置非常有用，而无需修改核心变量文件。
 
-*   **检查模式 (`--check`)**: 在不实际执行任何更改的情况下运行Playbook。这对于验证语法和逻辑非常有用。
-    ```bash
-    ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
-      ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-      -e "ocp_primary_cluster_name=primary-cluster.example.com" --check
-    ```
+**示例：覆盖 `group_vars` 中的变量**
 
-*   **差异模式 (`--diff`)**: 显示Playbook将要进行的更改的差异。这在与 `--check` 结合使用时特别有用。
-    ```bash
-    ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
-      ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-      -e "ocp_primary_cluster_name=primary-cluster.example.com" --diff
-    ```
+假设在 `ocp-v-dr-automation/group_vars/all.yml` 文件中定义了 `primary_nfs_server`：
 
-*   **启动Playbook从特定任务开始 (`--start-at-task`)**: 如果Playbook在某个任务失败，您可以在修复问题后从该任务重新开始，而不是从头运行整个Playbook。
-    ```bash
-    ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
-      ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-      -e "ocp_primary_cluster_name=primary-cluster.example.com" \
-      --start-at-task "Loop through each PV and sync"
-    ```
-    **注意**: 任务名称必须与Playbook中定义的 `name` 完全匹配。
+```yaml
+# ocp-v-dr-automation/group_vars/all.yml
+...
+primary_nfs_server: "192.168.99.1"
+...
+```
 
-*   **使用 `debug` 模块**: 在Playbook中添加 `ansible.builtin.debug` 任务来打印变量的值或任务的输出。
-    例如，在 `execute_periodic_sync.yml` 中，已经有一个 `debug` 任务来显示同步报告。您可以在任何任务之后添加类似的 `debug` 任务来检查 `nfs_pvs` 或 `snapshots` 变量的内容。
-    ```yaml
-    - name: "Get all NFS PVs from Primary OCP"
-      kubernetes.core.k8s_info:
-        api_version: v1
-        kind: PersistentVolume
-        label_selectors:
-          - storageClassName=nfs-dynamic
-      register: nfs_pvs
-      delegate_to: "{{ ocp_primary_cluster_name }}"
-
-    - name: "Debug NFS PVs" # 新增的调试任务
-      ansible.builtin.debug:
-        var: nfs_pvs
-    ```
-
-*   **限制主机 (`--limit`)**: 如果您的清单中有多个主机，您可以使用 `--limit` 选项将Playbook的执行限制到特定主机或组。虽然此Playbook `hosts: localhost`，但如果内部角色委托给其他主机，这仍然有用。
-    ```bash
-    ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
-      ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-      -e "ocp_primary_cluster_name=primary-cluster.example.com" \
-      --limit primary-cluster.example.com
-    ```
-
-通过结合使用这些工具和技术，您可以有效地运行和调试 `execute_periodic_sync.yml` Ansible Playbook。
-
-## 4. 运行Playbook
-
-使用 `ansible-playbook` 命令运行脚本。请确保您在 `ansible-dr-demo` 目录下执行此命令。
+如果您希望在本次运行中使用一个不同的NFS服务器地址（例如 `"192.168.100.5"`），您可以在命令行中这样操作：
 
 ```bash
 ansible-playbook -i ocp-v-dr-automation/inventory/hosts.ini \
   ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml \
-  -e "ocp_primary_cluster_name=primary-cluster.example.com"
+  -e "ocp_primary_cluster_name=primary-cluster.example.com" \
+  -e "primary_nfs_server=192.168.100.5"
 ```
 
-**解释**:
-*   `-i ocp-v-dr-automation/inventory/hosts.ini`: 指定Ansible清单文件。
-*   `ocp-v-dr-automation/playbooks/scheduled/execute_periodic_sync.yml`: 指定要运行的Playbook文件。
-*   `-e "ocp_primary_cluster_name=primary-cluster.example.com"`: 通过命令行传递 `ocp_primary_cluster_name` 变量。请根据您的实际Primary OCP集群主机名进行替换。
+在这个命令中，`-e "primary_nfs_server=192.168.100.5"` 将会覆盖文件中 `primary_nfs_server` 的默认值。Ansible在执行Playbook时会使用您在命令行中提供的值。您可以为任何在变量文件中定义的变量使用此方法。
 
-## 5. 调试Playbook
+## 4. 调试Playbook
 
 Ansible提供了多种调试选项：
 

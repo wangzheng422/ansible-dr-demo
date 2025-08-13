@@ -19,5 +19,5 @@ dr_nfs_base_path: "/srv/nfs/openshift-02"
 default_backup_name: "" # Empty means find the latest
 
 # OCP Connection Settings
-ocp_primary_api_server: "https://api.your-primary-ocp-cluster.com:6443"
+ocp_primary_api_server: "https://api.demo-01-rhsys.wzhlab.top:6443"
 ocp_primary_api_key: "your-primary-ocp-api-key"
