@@ -63,6 +63,8 @@ pip install ansible-rulebook ansible-core requests kubernetes
 
 ansible-galaxy collection install sabre1041.eda ansible.eda
 
+ansible-galaxy collection install -r requirements.yml
+
 sudo dnf install -y java-17-openjdk-devel
 
 sudo alternatives --config java
