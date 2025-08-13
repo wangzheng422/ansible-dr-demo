@@ -8,10 +8,10 @@
 
 1. **模式一：事件驱动的实时数据复制 (Event-Driven Replication)**  
    * **核心**：AAP Event-Driven Ansible (EDA) Controller。  
-   * **目标**：通过监听主 OpenShift 集群的 PV（PersistentVolume）事件，自动、实时地将底层存储数据同步到灾备站点。此模式响应速度最快，是数据同步的主要手段。
+   * **目标**：通过监听主 OpenShift 集群中指定命名空间内的 PV (PersistentVolume), PVC (PersistentVolumeClaim), VolumeSnapshot, 和 VolumeSnapshotContent 事件，自动、实时地将底层存储数据和相关元数据同步到灾备站点。此模式响应速度最快，是数据同步的主要手段。
 2. **模式二：周期性的主动同步 (Scheduled Proactive Sync)**
    * **核心**：AAP Workflow Scheduler。
-   * **目标**：定时（例如每小时）对主站点的所有 PV 和 VolumeSnapshot 进行全面扫描和同步，作为事件驱动模式的补充和校验，确保数据最终一致性，防止因事件丢失导致的数据差异。
+   * **目标**：定时（例如每小时）对主站点指定命名空间内的所有 PV, PVC, VolumeSnapshot, 和 VolumeSnapshotContent 进行全面扫描和同步，作为事件驱动模式的补充和校验，确保数据最终一致性，防止因事件丢失导致的数据差异。
 3. **模式三：手动触发的灾备恢复 (Manual Failover)**  
    * **核心**：AAP Workflow。  
    * **目标**：在发生灾难时，由管理员手动触发一个标准化的工作流，在灾备站点重建存储并恢复应用服务。
@@ -23,15 +23,19 @@
 **模式一: 事件驱动的实时复制 (Event-Driven Replication)**
 ```mermaid
 graph TD
-    A[Primary OCP Cluster] --> B{PV & VolumeSnapshot Events<br>ADDED/MODIFIED/DELETED};
-    B --> C[Python Event Forwarder<br>in-cluster deployment];
-    C -- HTTP POST --> D[AAP EDA Controller<br>ansible.eda.webhook];
+    subgraph "Primary OCP Cluster (Monitored Namespaces)"
+        A[Kubernetes API Server]
+    end
+
+    A --> B{Events<br>PV, PVC, VolumeSnapshot, VolumeSnapshotContent<br>ADDED/MODIFIED/DELETED};
+    B --> C[Python Event Forwarder<br>Filters by Namespace];
+    C -- HTTP POST with Namespace info --> D[AAP EDA Controller<br>ansible.eda.webhook];
     D --> E{Rulebook Matches Condition};
-    E -- PV ADDED/MODIFIED --> F[Trigger rsync on Primary NFS];
-    F --> G[DR NFS Server];
-    E -- PV DELETED --> H[Trigger Delete on DR NFS];
-    E -- VolumeSnapshot ADDED --> S1[Sync Snapshot Metadata];
-    E -- VolumeSnapshot DELETED --> S2[Delete Snapshot Metadata];
+    E -- PV/PVC ADDED/MODIFIED --> F[Sync Data e.g., rsync];
+    F --> G[DR Storage];
+    E -- PV/PVC DELETED --> H[Delete Data on DR Storage];
+    E -- VolumeSnapshot/Content ADDED --> S1[Sync Snapshot Metadata & Data];
+    E -- VolumeSnapshot/Content DELETED --> S2[Delete Snapshot Metadata & Data];
 
     style A fill:#cce5ff,stroke:#333,stroke-width:2px
     style B fill:#cce5ff,stroke:#333,stroke-width:2px
@@ -39,10 +43,10 @@ graph TD
     style D fill:#cce5ff,stroke:#333,stroke-width:2px
     style E fill:#cce5ff,stroke:#333,stroke-width:2px
     style F fill:#cce5ff,stroke:#333,stroke-width:2px
-    style G fill:#cce5ff,stroke:#333,stroke-width:2px
-    style H fill:#cce5ff,stroke:#333,stroke-width:2px
+    style G fill:#d4edda,stroke:#333,stroke-width:2px
+    style H fill:#f8d7da,stroke:#333,stroke-width:2px
     style S1 fill:#cce5ff,stroke:#333,stroke-width:2px
-    style S2 fill:#cce5ff,stroke:#333,stroke-width:2px
+    style S2 fill:#f8d7da,stroke:#333,stroke-width:2px
 ```
 
 **模式二: 周期性的主动同步 (Scheduled Proactive Sync)**
@@ -53,17 +57,17 @@ graph TD
     end
 
     subgraph Ansible Execution
-        B --> C[Playbook: execute_periodic_sync.yml];
-        C --> D[Get All PVs & Snapshots<br>from Primary OCP];
-        D --> E{Loop through each PV};
-        E -- NFS PV --> F[Role: periodic_storage_sync<br>Execute rsync for PV directory];
-        D --> G{Loop through each Snapshot};
-        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata];
+        B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: ['ns1', 'ns2']];
+        C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
+        D --> E{Loop through each PV/PVC};
+        E -- NFS based --> F[Role: periodic_storage_sync<br>Execute rsync for data];
+        D --> G{Loop through each VS/VSC};
+        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data];
         C --> I[Log Results & Generate Report];
     end
 
     subgraph Storage
-        F --> J[DR NFS Server];
+        F --> J[DR Storage];
         H --> K[DR Metadata Store];
     end
 
@@ -145,11 +149,18 @@ ocp-v-dr-automation/
 
 * **实现方式**: 在主 OpenShift 集群上，通过一个定制的 **Python 事件转发器 (k8s_event_forwarder.py)** 来实现。
   * 该转发器作为一个 Deployment 运行在集群内部，使用 `in-cluster` Service Account 进行认证。
-  * 它通过 `kubernetes` Python 客户端的 `watch` 功能，同时监视 `PersistentVolume` 和 `VolumeSnapshot` 两种资源。
-  * 当捕获到资源的 `ADDED`, `MODIFIED`, 或 `DELETED` 事件时，它会将事件封装成一个统一的 JSON 载荷，通过 HTTP POST 请求发送到 AAP EDA Controller 上配置的 Webhook 地址。
+  * **可配置的命名空间**: 转发器通过环境变量 (`WATCH_NAMESPACES`) 配置需要监视的命名空间列表。如果列表为空，则监视所有命名空间。
+  * 它通过 `kubernetes` Python 客户端的 `watch` 功能，同时监视以下四种资源：
+    * `PersistentVolume` (非命名空间绑定)
+    * `PersistentVolumeClaim` (命名空间绑定)
+    * `VolumeSnapshot` (命名空间绑定)
+    * `VolumeSnapshotContent` (非命名空间绑定)
+  * 当捕获到资源的 `ADDED`, `MODIFIED`, 或 `DELETED` 事件时，对于命名空间绑定的资源，它会检查资源是否属于被监视的命名空间。如果匹配，它会将事件封装成一个统一的 JSON 载荷（包含资源的 `namespace` 信息），通过 HTTP POST 请求发送到 AAP EDA Controller 上配置的 Webhook 地址。
 * **触发条件**:
   * **PersistentVolume**: 监听 `v1.PersistentVolume` 资源的所有事件。
-  * **VolumeSnapshot**: 监听 `snapshot.storage.k8s.io/v1` 组下的 `VolumeSnapshot` 资源的所有事件。
+  * **PersistentVolumeClaim**: 监听指定命名空间下的 `v1.PersistentVolumeClaim` 资源事件。
+  * **VolumeSnapshot**: 监听指定命名空间下的 `snapshot.storage.k8s.io/v1` 组的 `VolumeSnapshot` 资源事件。
+  * **VolumeSnapshotContent**: 监听 `snapshot.storage.k8s.io/v1` 组的 `VolumeSnapshotContent` 资源事件。
 
 #### 流程 3-4: AAP EDA Rulebook 与逻辑分发
 
@@ -166,40 +177,73 @@ ocp-v-dr-automation/
         # 在 AAP 中，需要配置 token 来保护此 webhook
         # token: "{{ eda_webhook_token }}"
 
+  vars:
+    # 定义需要同步的命名空间列表，可以从外部注入
+    watched_namespaces:
+      - "app-ns1"
+      - "app-ns2"
+
   rules:
-    # 规则 1: 处理 NFS PV 的创建和修改
-    - name: Handle NFS PV Create or Update
+    # 规则 1: 处理 PV 的创建和修改 (非命名空间资源)
+    - name: Handle PV Create or Update
       condition: >
         event.kind == "PersistentVolume" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_job_template:
+          name: "EDA - Sync PV to DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # 规则 2: 处理 PV 的删除 (非命名空间资源)
+    - name: Handle PV Deletion
+      condition: >
+        event.kind == "PersistentVolume" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete PV from DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # 规则 3: 处理受监控命名空间中 PVC 的创建和修改
+    - name: Handle PVC Create or Update in Watched Namespaces
+      condition: >
+        event.kind == "PersistentVolumeClaim" and
         (event.type == "ADDED" or event.type == "MODIFIED") and
-        event.resource.spec.storageClassName == "nfs-dynamic"
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
-          name: "EDA - Sync NFS PV to DR"
+          name: "EDA - Sync PVC to DR"
           organization: "Default"
           job_args:
             extra_vars:
-              pv_object: "{{ event.resource }}" # 转发器封装的完整PV对象
+              resource_object: "{{ event.resource }}"
 
-    # 规则 2: 处理 NFS PV 的删除
-    - name: Handle NFS PV Deletion
+    # 规则 4: 处理受监控命名空间中 PVC 的删除
+    - name: Handle PVC Deletion in Watched Namespaces
       condition: >
-        event.kind == "PersistentVolume" and
+        event.kind == "PersistentVolumeClaim" and
         event.type == "DELETED" and
-        event.resource.spec.storageClassName == "nfs-dynamic"
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
-          name: "EDA - Delete NFS PV from DR"
+          name: "EDA - Delete PVC from DR"
           organization: "Default"
           job_args:
             extra_vars:
-              pv_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
 
-    # 规则 3: 处理 VolumeSnapshot 的创建
-    - name: Handle VolumeSnapshot Creation
+    # 规则 5: 处理受监控命名空间中 VolumeSnapshot 的创建
+    - name: Handle VolumeSnapshot Creation in Watched Namespaces
       condition: >
         event.kind == "VolumeSnapshot" and
         event.type == "ADDED" and
+        event.resource.metadata.namespace in watched_namespaces and
         event.resource.status.readyToUse == true
       action:
         run_job_template:
@@ -207,38 +251,58 @@ ocp-v-dr-automation/
           organization: "Default"
           job_args:
             extra_vars:
-              snapshot_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
 
-    # 规则 4: 处理 VolumeSnapshot 的删除
-    - name: Handle VolumeSnapshot Deletion
+    # 规则 6: 处理受监控命名空间中 VolumeSnapshot 的删除
+    - name: Handle VolumeSnapshot Deletion in Watched Namespaces
       condition: >
         event.kind == "VolumeSnapshot" and
-        event.type == "DELETED"
+        event.type == "DELETED" and
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
           name: "EDA - Delete VolumeSnapshot Metadata"
           organization: "Default"
           job_args:
             extra_vars:
-              snapshot_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
+
+    # 规则 7: 处理 VolumeSnapshotContent 的创建和修改 (非命名空间资源)
+    - name: Handle VolumeSnapshotContent Create or Update
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_job_template:
+          name: "EDA - Sync VSC Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # 规则 8: 处理 VolumeSnapshotContent 的删除 (非命名空间资源)
+    - name: Handle VolumeSnapshotContent Deletion
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete VSC Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
 ```
 * **对应的 Playbooks**:
-  * **playbooks/event_driven/handle_nfs_pv_sync.yml**:
-    1. 接收 AAP EDA 传递过来的 `pv_object` 变量。
-    2. 调用 `nfs_sync_on_event` 角色。
-    3. 角色逻辑：仅调试传入的 `pv_object` 变量。所有路径构造和 `rsync` 逻辑均已注释。
-  * **playbooks/event_driven/handle_nfs_pv_delete.yml**:
-    1. 接收 `pv_object` 变量。
-    2. 调用 `nfs_delete_on_event` 角色。
-    3. 角色逻辑：仅调试传入的 `pv_object` 变量。所有路径构造和 `rsync` 逻辑均已注释。
-  * **playbooks/event_driven/handle_snapshot_sync.yml**:
-    1. 接收 `snapshot_object` 变量。
-    2. 调用 `snapshot_sync_on_event` 角色。
-    3. 角色逻辑：解析快照元数据，可能需要在灾备站点记录快照信息或触发其他相关操作。
-  * **playbooks/event_driven/handle_snapshot_delete.yml**:
-    1. 接收 `snapshot_object` 变量。
-    2. 调用 `snapshot_delete_on_event` 角色。
-    3. 角色逻辑：根据快照元数据，在灾备站点清理对应的记录或资源。
+  * Playbook 现在应该更加通用，以处理不同类型的资源对象。例如，可以有一个通用的 `handle_resource_sync.yml` 和 `handle_resource_delete.yml`，它们接收 `resource_object` 变量，并根据 `resource_object.kind` 来调用不同的角色或执行不同的逻辑。
+  * **playbooks/event_driven/handle_resource_sync.yml**:
+    1. 接收 AAP EDA 传递过来的 `resource_object` 变量。
+    2. 根据 `resource_object.kind` (e.g., "PersistentVolume", "PersistentVolumeClaim") 调用相应的同步角色。
+    3. 角色逻辑：解析传入的 `resource_object`，执行数据和元数据同步。
+  * **playbooks/event_driven/handle_resource_delete.yml**:
+    1. 接收 `resource_object` 变量。
+    2. 根据 `resource_object.kind` 调用相应的删除角色。
+    3. 角色逻辑：解析传入的 `resource_object`，在灾备端执行清理操作。
 
 ### **5\. 模式二：周期性主动同步逻辑详解**
 
@@ -246,30 +310,34 @@ ocp-v-dr-automation/
 
 *   **Playbook**: `playbooks/scheduled/execute_periodic_sync.yml`
 *   **核心角色**: `roles/periodic_storage_sync`
+*   **关键变量**: Playbook 应通过变量 `target_namespaces` (例如 `['ns1', 'ns2']`) 来指定要同步的命名空间。
 
 #### **流程详解**:
 
 1.  **获取所有相关资源**:
     *   连接到主 OpenShift 集群 (`ocp_primary`)。
-    *   使用 `k8s_info` 模块获取所有 `storageClassName` 为 `nfs-dynamic` 的 `PersistentVolume` 列表。
-    *   使用 `k8s_info` 模块获取所有 `VolumeSnapshot` 列表。
+    *   使用 `k8s_info` 模块，遍历 `target_namespaces` 列表，获取每个命名空间下的 `PersistentVolumeClaim` 和 `VolumeSnapshot` 列表。
+    *   使用 `k8s_info` 模块获取所有相关的 `PersistentVolume` 和 `VolumeSnapshotContent` 列表（这些是非命名空间资源，但可以通过关联的 PVC 和 VolumeSnapshot 进行筛选）。
 
-2.  **遍历并同步 PV**:
-    *   在 Playbook 中，使用 `loop` 循环遍历获取到的 PV 列表。
-    *   对于每一个 PV，调用 `periodic_storage_sync` 角色。
+2.  **遍历并同步 PVC/PV**:
+    *   在 Playbook 中，使用 `loop` 循环遍历获取到的 PVC 列表。
+    *   对于每一个 PVC，找到其绑定的 PV (`spec.volumeName`)。
+    *   调用 `periodic_storage_sync` 角色，传入 PVC 和 PV 对象。
     *   **角色逻辑 (`periodic_storage_sync`)**:
-        *   **输入**: 单个 `pv_object`。
-        *   **构造路径**: 从 `pv_object.spec.nfs.path` 提取源路径。目标路径可以基于源路径在灾备 NFS 服务器上生成。
-        *   **执行同步**: `delegate_to` 到灾备 NFS 服务器 (`dr_nfs_server`)，执行 `rsync -av --delete` 命令，确保灾备端与主站点的目录完全一致。
-        *   **记录日志**: 记录每个 PV 的同步状态（成功、失败、差异）。
+        *   **输入**: `pvc_object` 和 `pv_object`。
+        *   **构造路径**: 从 `pv_object.spec.nfs.path` 或其他存储类型的定义中提取源路径。
+        *   **执行同步**: `delegate_to` 到灾备存储端，执行 `rsync` 或其他同步命令。
+        *   **同步元数据**: 将 PVC 的定义（YAML/JSON）也同步到灾备端的元数据存储中，以备恢复时使用。
+        *   **记录日志**: 记录每个 PVC/PV 的同步状态。
 
-3.  **遍历并同步 VolumeSnapshot**:
+3.  **遍历并同步 VolumeSnapshot/VolumeSnapshotContent**:
     *   同样使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
-    *   对于每一个快照，调用 `periodic_storage_sync` 角色（或一个专门处理快照的独立角色）。
+    *   对于每一个 VolumeSnapshot，找到其绑定的 `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`)。
+    *   调用 `periodic_storage_sync` 角色（或专门的角色），传入 VS 和 VSC 对象。
     *   **角色逻辑**:
-        *   **输入**: 单个 `snapshot_object`。
-        *   **同步元数据**: 确保快照的元数据（例如创建时间、关联的 PV 等）在灾备站点的记录库中是最新的。
-        *   **（可选）同步快照数据**: 如果底层存储支持基于快照的增量同步，则触发相应的同步命令。对于 NFS，这通常意味着同步与快照关联的特定数据目录。
+        *   **输入**: `snapshot_object` 和 `content_object`。
+        *   **同步元数据**: 将 VS 和 VSC 的定义同步到灾备端的元数据存储。
+        *   **同步快照数据**: 根据 `content_object.spec.source` 确定快照数据的位置并执行同步。
 
 4.  **生成报告**:
     *   在 Playbook 的最后，汇总所有资源的同步结果。
@@ -298,11 +366,11 @@ ocp-v-dr-automation/
 #### 流程 1-3: 查找并解析备份
 
 *   **角色: oadp_backup_parser**
-    1.  **输入**: 由 AAP 调查问卷（Survey）提供要恢复的 `backup_name` (如果为空，则自动查找最新的)。
+    1.  **输入**: 由 AAP 调查问卷（Survey）提供要恢复的 `backup_name` (如果为空，则自动查找最新的) 和 `namespace`。
     2.  在 `localhost` 上执行。
     3.  从 S3 下载指定的 OADP 备份包。
-    4.  解压并解析，提取所有 PV 和 PVC 的 JSON 定义，形成 `pv_info_list` 和 `pvc_info_list` 变量。
-    5.  **输出**: `pv_info_list` 和 `pvc_info_list` 变量。
+    4.  解压并解析，提取所有 PV, PVC, VolumeSnapshot, 和 VolumeSnapshotContent 的 JSON 定义，形成 `pv_info_list`, `pvc_info_list`, `vs_info_list`, `vsc_info_list` 变量。
+    5.  **输出**: 包含所有已解析资源定义的列表变量。
 
 #### 流程 4-5: 存储逻辑分发与验证 (NFS 场景)
 
@@ -316,17 +384,24 @@ ocp-v-dr-automation/
 #### 流程 6: 在 DR OCP 上部署存储
 
 *   **角色: dr_storage_provisioner**
-    1.  **输入**: `pv_info_list` 和 `pvc_info_list`。
+    1.  **输入**: `pv_info_list`, `pvc_info_list`, `vs_info_list`, `vsc_info_list`。
     2.  连接到灾备 OCP 集群 (`ocp_dr`)。
-    3.  循环遍历 `pv_info_list`，动态生成新的 PV 定义。**关键修改**: 更新 `spec.nfs.server` 为灾备 NFS 服务器 IP，并根据灾备站点的存储布局调整 `spec.nfs.path`。然后将修改后的 PV 定义 `apply` 到灾备集群。
-    4.  循环遍历 `pvc_info_list`，并将它们 `apply` 到灾备集群。
+    3.  **恢复顺序至关重要**:
+    4.  **第一步: 恢复 VolumeSnapshotContent 和 PV**:
+        *   循环遍历 `vsc_info_list` 和 `pv_info_list`。
+        *   **关键修改**: 更新 `vsc_object` 和 `pv_object` 中的存储后端细节（例如 NFS 服务器 IP 和路径）。
+        *   将修改后的 VSC 和 PV 定义 `apply` 到灾备集群。
+    5.  **第二步: 恢复 VolumeSnapshot 和 PVC**:
+        *   循环遍历 `vs_info_list` 和 `pvc_info_list`。
+        *   这些对象通常不需要修改，因为它们通过名称引用 VSC 和 PV。
+        *   将它们 `apply` 到灾备集群的目标命名空间。
 
 #### 7. 在 DR OCP 上恢复应用
 
 *   **角色: oadp_restore_trigger**
     1.  **输入**: `backup_name`。
     2.  连接到灾备 OCP 集群 (`ocp_dr`)。
-    3.  动态生成 Restore 对象，`spec.backupName` 设置为输入的 `backup_name`，并且 `excludedResources` 必须包含 `persistentvolumes` 和 `persistentvolumeclaims`。
+    3.  动态生成 Restore 对象，`spec.backupName` 设置为输入的 `backup_name`，并且 `excludedResources` 必须包含 `persistentvolumes`, `persistentvolumeclaims`, `volumesnapshots`, `volumesnapshotcontents`。
     4.  `apply` 这个 Restore 对象，并轮询 VM 状态直到成功。
 
 #### 8. 灾备恢复后验证与清理

@@ -1,3 +1,5 @@
+# This is an Ansible Rulebook, not a Playbook.
+# It should be run with ansible-rulebook, not ansible-playbook.
 ---
 - name: Process OCP DR Events from Webhook
   hosts: localhost
@@ -5,43 +7,76 @@
     - ansible.eda.webhook:
         host: 0.0.0.0
         port: 5000
-        # 在 AAP 中，需要配置 token 来保护此 webhook
+        # In AAP, a token should be configured to protect this webhook
         # token: "{{ eda_webhook_token }}"
 
+  vars:
+    # Define the list of namespaces to watch, this can be injected externally
+    watched_namespaces:
+      - "app-ns1"
+      - "app-ns2"
+
   rules:
-    # 规则 1: 处理 NFS PV 的创建和修改
-    - name: Handle NFS PV Create or Update
+    # Rule 1: Handle PV creation and modification (non-namespaced)
+    - name: Handle PV Create or Update
       condition: >
         event.kind == "PersistentVolume" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_job_template:
+          name: "EDA - Sync PV to DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # Rule 2: Handle PV deletion (non-namespaced)
+    - name: Handle PV Deletion
+      condition: >
+        event.kind == "PersistentVolume" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete PV from DR"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # Rule 3: Handle PVC creation and modification in watched namespaces
+    - name: Handle PVC Create or Update in Watched Namespaces
+      condition: >
+        event.kind == "PersistentVolumeClaim" and
         (event.type == "ADDED" or event.type == "MODIFIED") and
-        event.resource.spec.storageClassName == "nfs-dynamic"
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
-          name: "EDA - Sync NFS PV to DR"
+          name: "EDA - Sync PVC to DR"
           organization: "Default"
           job_args:
             extra_vars:
-              pv_object: "{{ event.resource }}" # 转发器封装的完整PV对象
+              resource_object: "{{ event.resource }}"
 
-    # 规则 2: 处理 NFS PV 的删除
-    - name: Handle NFS PV Deletion
+    # Rule 4: Handle PVC deletion in watched namespaces
+    - name: Handle PVC Deletion in Watched Namespaces
       condition: >
-        event.kind == "PersistentVolume" and
+        event.kind == "PersistentVolumeClaim" and
         event.type == "DELETED" and
-        event.resource.spec.storageClassName == "nfs-dynamic"
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
-          name: "EDA - Delete NFS PV from DR"
+          name: "EDA - Delete PVC from DR"
           organization: "Default"
           job_args:
             extra_vars:
-              pv_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
 
-    # 规则 3: 处理 VolumeSnapshot 的创建
-    - name: Handle VolumeSnapshot Creation
+    # Rule 5: Handle VolumeSnapshot creation in watched namespaces
+    - name: Handle VolumeSnapshot Creation in Watched Namespaces
       condition: >
         event.kind == "VolumeSnapshot" and
         event.type == "ADDED" and
+        event.resource.metadata.namespace in watched_namespaces and
         event.resource.status.readyToUse == true
       action:
         run_job_template:
@@ -49,17 +84,44 @@
           organization: "Default"
           job_args:
             extra_vars:
-              snapshot_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
 
-    # 规则 4: 处理 VolumeSnapshot 的删除
-    - name: Handle VolumeSnapshot Deletion
+    # Rule 6: Handle VolumeSnapshot deletion in watched namespaces
+    - name: Handle VolumeSnapshot Deletion in Watched Namespaces
       condition: >
         event.kind == "VolumeSnapshot" and
-        event.type == "DELETED"
+        event.type == "DELETED" and
+        event.resource.metadata.namespace in watched_namespaces
       action:
         run_job_template:
           name: "EDA - Delete VolumeSnapshot Metadata"
           organization: "Default"
           job_args:
             extra_vars:
-              snapshot_object: "{{ event.resource }}"
+              resource_object: "{{ event.resource }}"
+
+    # Rule 7: Handle VolumeSnapshotContent creation and modification (non-namespaced)
+    - name: Handle VolumeSnapshotContent Create or Update
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_job_template:
+          name: "EDA - Sync VSC Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
+
+    # Rule 8: Handle VolumeSnapshotContent deletion (non-namespaced)
+    - name: Handle VolumeSnapshotContent Deletion
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        event.type == "DELETED"
+      action:
+        run_job_template:
+          name: "EDA - Delete VSC Metadata"
+          organization: "Default"
+          job_args:
+            extra_vars:
+              resource_object: "{{ event.resource }}"
