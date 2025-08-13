@@ -97,7 +97,46 @@ ansible-rulebook --rulebook rulebooks/ocp_pv_listener_debug.yml --verbose
 
 ```
 
-## config ocp
+## config ocp primary
+
+```bash
+# Connect your 'oc' client to the REMOTE cluster
+oc create serviceaccount eda-event-reader -n default
+
+cat << EOF > $BASE_DIR/data/install/eda-pv-event-reader.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: eda-pv-event-reader
+rules:
+- apiGroups: [""] # Core API group
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["snapshot.storage.k8s.io"]
+  resources: ["volumesnapshots", "volumesnapshotcontents"]
+  verbs: ["get", "list", "watch"]
+EOF
+
+oc apply -f $BASE_DIR/data/install/eda-pv-event-reader.yaml
+
+oc create clusterrolebinding eda-pv-reader-binding \
+  --clusterrole=eda-pv-event-reader \
+  --serviceaccount=default:eda-event-reader
+
+oc config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+# Example Output: https://api.demo-01-rhsys.wzhlab.top:6443
+
+oc config view --raw --minify -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' | base64 --decode
+# This will print the full -----BEGIN CERTIFICATE-----... content.
+
+# create token of the sa, and save to variable, expire date is 100 years
+SA_TOKEN=`oc create token eda-event-reader --duration=876000h -n default`
+
+echo $SA_TOKEN
+
+```
+
+## config ocp dr
 
 ```bash
 # Connect your 'oc' client to the REMOTE cluster

@@ -330,9 +330,9 @@ ocp-v-dr-automation/
         *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。
         *   **第二步：修改并应用 PV**:
             *   在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。
-            *   使用 `kubernetes.core.k8s` 模块，将修改后的 PV 定义 `apply` 到灾备 OpenShift 集群 (`ocp_dr`)。
+            *   使用 `kubernetes.core.k8s` 模块，通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 变量连接到灾备 OpenShift 集群 (`ocp_dr`)，然后将修改后的 PV 定义 `apply` 到该集群。
         *   **第三步：应用 PVC**:
-            *   使用 `kubernetes.core.k8s` 模块，将原始的 `pvc_object` 定义 `apply` 到灾备 OpenShift 集群的目标命名空间中。
+            *   使用 `kubernetes.core.k8s` 模块，同样通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 连接，将原始的 `pvc_object` 定义 `apply` 到灾备 OpenShift 集群的目标命名空间中。
         *   **记录日志**: 记录每个 PV 和 PVC 在灾备集群上的部署状态。
         *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
 

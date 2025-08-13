@@ -25,13 +25,17 @@
       kubernetes.core.k8s:
         state: present
         definition: "{{ dr_pv_object }}"
-      delegate_to: localhost
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
 
     - name: "Create or Update PVC on DR cluster"
       kubernetes.core.k8s:
         state: present
         definition: "{{ pvc_object }}"
-      delegate_to: localhost
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
 
     - name: "Log PV and PVC sync status"
       ansible.builtin.debug:
