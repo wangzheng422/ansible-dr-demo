@@ -24,7 +24,7 @@
 
     - name: "Modify PV definition for DR"
       ansible.builtin.set_fact:
-        dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': dr_pv_path}}}, recursive=True) }}"
+        dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': dr_pv_path}, 'persistentVolumeReclaimPolicy': 'Retain'}}, recursive=True) }}"
 
     - name: "Clean up PV metadata for DR"
       ansible.builtin.set_fact:
