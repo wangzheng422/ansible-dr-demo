@@ -7,66 +7,69 @@ import json
 import threading
 from kubernetes import client, config, watch
 
-# 从环境变量中获取EDA Webhook的URL
+# Get EDA Webhook URL from environment variable
 EDA_WEBHOOK_URL = os.environ.get("EDA_WEBHOOK_URL")
 if not EDA_WEBHOOK_URL:
-    raise ValueError("环境变量 EDA_WEBHOOK_URL 未设置！")
+    raise ValueError("Environment variable EDA_WEBHOOK_URL is not set!")
 
 def send_event_to_eda(payload):
-    """将格式化后的事件载荷发送到EDA Webhook"""
+    """Sends the formatted event payload to the EDA Webhook."""
     try:
-        print(f"发送事件: Kind={payload['kind']}, Type={payload['type']}, Name={payload['resource']['metadata']['name']}")
-        requests.post(EDA_WEBHOOK_URL, json=payload, timeout=10)
+        print(f"Sending event: Kind={payload['kind']}, Type={payload['type']}, Name={payload['resource']['metadata']['name']}")
+        # Use json.dumps with default=str to handle datetime objects
+        headers = {'Content-Type': 'application/json'}
+        data = json.dumps(payload, default=str)
+        requests.post(EDA_WEBHOOK_URL, data=data, headers=headers, timeout=10)
     except requests.exceptions.RequestException as e:
-        print(f"发送事件到EDA失败: {e}")
+        print(f"Failed to send event to EDA: {e}")
 
 def watch_kubernetes_resource(api_call, resource_kind):
-    """一个通用的、用于监视指定K8s资源并转发事件的工作函数"""
+    """A generic worker function to watch a specified K8s resource and forward events."""
     while True:
         try:
-            print(f"开始监视 {resource_kind} 资源...")
+            print(f"Starting to watch {resource_kind} resources...")
             w = watch.Watch()
-            # 使用指定的API调用来启动事件流
+            # Use the specified API call to start the event stream
             for event in w.stream(api_call):
-                # 构造我们自己的JSON载荷
+                # Construct our own JSON payload
                 payload = {
                     "type": event['type'],          # ADDED, MODIFIED, DELETED
                     "kind": resource_kind,
-                    "resource": event['object'].to_dict() # 将K8s对象转换为字典
+                    "resource": event['object'].to_dict() # Convert K8s object to a dictionary
                 }
                 send_event_to_eda(payload)
         except client.ApiException as e:
-            if e.status == 410: # "Gone" - 资源版本太旧，监视中断
-                print(f"监视 {resource_kind} 时连接中断 (410 Gone)，立即重连...")
+            if e.status == 410: # "Gone" - The resource version is too old, watch is interrupted
+                print(f"Watch connection closed for {resource_kind} (410 Gone), reconnecting immediately...")
             else:
-                print(f"监视 {resource_kind} 时发生API错误: {e}")
-                print("将在30秒后重试...")
+                print(f"API error while watching {resource_kind}: {e}")
+                print("Retrying in 30 seconds...")
                 time.sleep(30)
         except Exception as e:
-            print(f"监视 {resource_kind} 时发生未知错误: {e}")
-            print("将在30秒后重试...")
+            print(f"Unknown error while watching {resource_kind}: {e}")
+            print("Retrying in 30 seconds...")
             time.sleep(30)
 
 if __name__ == "__main__":
-    # 加载in-cluster配置，让程序在Pod内部自动认证
-    print("加载 in-cluster Kubernetes 配置...")
+    # Load in-cluster configuration for automatic authentication within a Pod
+    print("Loading in-cluster Kubernetes configuration...")
     config.load_incluster_config()
-    print("配置加载成功。")
+    print("Configuration loaded successfully.")
 
-    # 创建API客户端实例
+    # Create API client instances
     core_v1_api = client.CoreV1Api()
     snapshot_v1_api = client.CustomObjectsApi()
     
-    # 为两种不同的资源创建并启动独立的监视线程
-    # 线程1: 监视 PersistentVolumes
+    # Create and start separate watch threads for two different resources
+    # Thread 1: Watch PersistentVolumes
     pv_thread = threading.Thread(
         target=watch_kubernetes_resource,
         args=(core_v1_api.list_persistent_volume, "PersistentVolume"),
         daemon=True
     )
 
-    # 线程2: 监视 VolumeSnapshots
-    # 注意: VolumeSnapshot是Custom Resource, 使用CustomObjectsApi
+    # Thread 2: Watch VolumeSnapshots
+    # Note: VolumeSnapshot is a Custom Resource, using CustomObjectsApi
     snapshot_thread = threading.Thread(
         target=watch_kubernetes_resource,
         args=(
@@ -83,9 +86,9 @@ if __name__ == "__main__":
     pv_thread.start()
     snapshot_thread.start()
     
-    # 主线程保持运行，以便子线程可以继续工作
+    # Keep the main thread alive so that the daemon threads can continue to work
     while True:
         time.sleep(60)
         if not pv_thread.is_alive() or not snapshot_thread.is_alive():
-            print("错误：一个或多个监视线程已停止！程序将退出。")
+            print("Error: One or more watch threads have stopped! The program will exit.")
             break
