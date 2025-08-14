@@ -104,10 +104,14 @@ cd ~/git/ansible-dr-demo/ocp-event-forward
 
 cat rbac.yaml | oc apply -f -
 
+
+oc delete deploy/eda-k8s-event-forwarder -n eda
+
 cat deployment.yaml | \
 sed "s#quay.io/your-repo/eda-k8s-event-forwarder:latest#quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v01#g" | \
 sed "s#http://your-eda-webhook-url:port#http://192.168.99.1:5000#g" | \
 oc apply -f -
+
 
 
 
