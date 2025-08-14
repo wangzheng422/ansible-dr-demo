@@ -28,7 +28,7 @@
 
     - name: "Clean up PV metadata for DR"
       ansible.builtin.set_fact:
-        dr_pv_definition: "{{ dr_pv_object | combine({'metadata': dr_pv_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
+        dr_pv_definition: "{{ dr_pv_object | combine({'spec': dr_pv_object.spec | combine({'claimRef': omit})}) | combine({'metadata': dr_pv_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
 
     - name: "Create or Update PV on DR cluster"
       kubernetes.core.k8s:
