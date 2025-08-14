@@ -166,135 +166,15 @@ ocp-v-dr-automation/
 
 #### 流程 3-4: AAP EDA Rulebook 与逻辑分发
 
-* **文件**: rulebooks/ocp_dr_events.yml  
+* **文件**: `rulebooks/ocp_dr_events.yml`
 * **逻辑设计**:
-```yaml
----
-- name: Process OCP DR Events from Webhook
-  hosts: localhost
-  sources:
-    - ansible.eda.webhook:
-        host: 0.0.0.0
-        port: 5000
-        # 在 AAP 中，需要配置 token 来保护此 webhook
-        # token: "{{ eda_webhook_token }}"
-
-  vars:
-    # 定义需要同步的命名空间列表，可以从外部注入
-    watched_namespaces:
-      - "app-ns1"
-      - "app-ns2"
-
-  rules:
-    # 规则 1: 处理 PV 的创建和修改 (非命名空间资源)
-    - name: Handle PV Create or Update
-      condition: >
-        event.kind == "PersistentVolume" and
-        (event.type == "ADDED" or event.type == "MODIFIED")
-      action:
-        run_job_template:
-          name: "EDA - Sync PV to DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 2: 处理 PV 的删除 (非命名空间资源)
-    - name: Handle PV Deletion
-      condition: >
-        event.kind == "PersistentVolume" and
-        event.type == "DELETED"
-      action:
-        run_job_template:
-          name: "EDA - Delete PV from DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 3: 处理受监控命名空间中 PVC 的创建和修改
-    - name: Handle PVC Create or Update in Watched Namespaces
-      condition: >
-        event.kind == "PersistentVolumeClaim" and
-        (event.type == "ADDED" or event.type == "MODIFIED") and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Sync PVC to DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 4: 处理受监控命名空间中 PVC 的删除
-    - name: Handle PVC Deletion in Watched Namespaces
-      condition: >
-        event.kind == "PersistentVolumeClaim" and
-        event.type == "DELETED" and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Delete PVC from DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 5: 处理受监控命名空间中 VolumeSnapshot 的创建
-    - name: Handle VolumeSnapshot Creation in Watched Namespaces
-      condition: >
-        event.kind == "VolumeSnapshot" and
-        event.type == "ADDED" and
-        event.resource.metadata.namespace in watched_namespaces and
-        event.resource.status.readyToUse == true
-      action:
-        run_job_template:
-          name: "EDA - Sync VolumeSnapshot Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 6: 处理受监控命名空间中 VolumeSnapshot 的删除
-    - name: Handle VolumeSnapshot Deletion in Watched Namespaces
-      condition: >
-        event.kind == "VolumeSnapshot" and
-        event.type == "DELETED" and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Delete VolumeSnapshot Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 7: 处理 VolumeSnapshotContent 的创建和修改 (非命名空间资源)
-    - name: Handle VolumeSnapshotContent Create or Update
-      condition: >
-        event.kind == "VolumeSnapshotContent" and
-        (event.type == "ADDED" or event.type == "MODIFIED")
-      action:
-        run_job_template:
-          name: "EDA - Sync VSC Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # 规则 8: 处理 VolumeSnapshotContent 的删除 (非命名空间资源)
-    - name: Handle VolumeSnapshotContent Deletion
-      condition: >
-        event.kind == "VolumeSnapshotContent" and
-        event.type == "DELETED"
-      action:
-        run_job_template:
-          name: "EDA - Delete VSC Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-```
+  该规则手册通过 `ansible.eda.webhook` 监听来自 OCP 事件转发器的 HTTP POST 请求。它定义了一系列规则，用于根据事件的类型 (`ADDED`, `MODIFIED`, `DELETED`) 和资源类型 (`PersistentVolume`, `PersistentVolumeClaim`, `VolumeSnapshot`, `VolumeSnapshotContent`) 触发不同的 AAP 作业模板。
+  - **核心变量**: `watched_namespaces` 用于定义需要监控的命名空间列表。
+  - **规则分类**:
+    - **非命名空间资源 (PV, VSC)**: 直接处理其创建、修改和删除事件。
+    - **命名空间资源 (PVC, VS)**: 在处理事件前，会检查资源的命名空间是否在 `watched_namespaces` 列表中。
+  - **触发动作**: 每个规则匹配成功后，会调用 `run_job_template` 动作，将事件中的资源对象 (`event.resource`) 作为 `extra_vars` 传递给相应的 AAP 作业模板（例如 "EDA - Sync PV to DR" 或 "EDA - Delete PVC from DR"），从而启动后续的同步或清理流程。
+  - **快照特殊处理**: 对于 `VolumeSnapshot` 的创建事件，规则会额外检查 `status.readyToUse == true` 条件，确保只在快照可用时才触发同步。
 * **对应的 Playbooks**:
   * Playbook 现在应该更加通用，以处理不同类型的资源对象。例如，可以有一个通用的 `handle_resource_sync.yml` 和 `handle_resource_delete.yml`，它们接收 `resource_object` 变量，并根据 `resource_object.kind` 来调用不同的角色或执行不同的逻辑。
   * **playbooks/event_driven/handle_resource_sync.yml**:
