@@ -60,7 +60,7 @@ if __name__ == "__main__":
     core_v1_api = client.CoreV1Api()
     snapshot_v1_api = client.CustomObjectsApi()
     
-    # Create and start separate watch threads for two different resources
+    # Create and start separate watch threads for multiple resources
     # Thread 1: Watch PersistentVolumes
     pv_thread = threading.Thread(
         target=watch_kubernetes_resource,
@@ -68,8 +68,14 @@ if __name__ == "__main__":
         daemon=True
     )
 
-    # Thread 2: Watch VolumeSnapshots
-    # Note: VolumeSnapshot is a Custom Resource, using CustomObjectsApi
+    # Thread 2: Watch PersistentVolumeClaims
+    pvc_thread = threading.Thread(
+        target=watch_kubernetes_resource,
+        args=(core_v1_api.list_persistent_volume_claim_for_all_namespaces, "PersistentVolumeClaim"),
+        daemon=True
+    )
+
+    # Thread 3: Watch VolumeSnapshots
     snapshot_thread = threading.Thread(
         target=watch_kubernetes_resource,
         args=(
@@ -83,13 +89,30 @@ if __name__ == "__main__":
         ),
         daemon=True
     )
+
+    # Thread 4: Watch VolumeSnapshotContents
+    snapshotcontent_thread = threading.Thread(
+        target=watch_kubernetes_resource,
+        args=(
+            lambda **kwargs: snapshot_v1_api.list_cluster_custom_object(
+                group="snapshot.storage.k8s.io",
+                version="v1",
+                plural="volumesnapshotcontents",
+                **kwargs
+            ),
+            "VolumeSnapshotContent"
+        ),
+        daemon=True
+    )
     
     pv_thread.start()
+    pvc_thread.start()
     snapshot_thread.start()
+    snapshotcontent_thread.start()
     
     # Keep the main thread alive so that the daemon threads can continue to work
     while True:
         time.sleep(60)
-        if not pv_thread.is_alive() or not snapshot_thread.is_alive():
+        if not all([pv_thread.is_alive(), pvc_thread.is_alive(), snapshot_thread.is_alive(), snapshotcontent_thread.is_alive()]):
             print("Error: One or more watch threads have stopped! The program will exit.")
             break
