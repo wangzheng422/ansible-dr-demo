@@ -151,6 +151,7 @@ ocp-v-dr-automation/
 
 * **实现方式**: 在主 OpenShift 集群上，通过一个定制的 **Python 事件转发器 (k8s_event_forwarder.py)** 来实现。
   * 该转发器作为一个 Deployment 运行在集群内部，使用 `in-cluster` Service Account 进行认证。
+  * 容器镜像基于 Red Hat UBI 8 (`registry.access.redhat.com/ubi8/python-39`) 构建，确保了环境的稳定性和安全性。
   * **可配置的命名空间**: 转发器通过环境变量 (`WATCH_NAMESPACES`) 配置需要监视的命名空间列表。如果列表为空，则监视所有命名空间。
   * 它通过 `kubernetes` Python 客户端的 `watch` 功能，同时监视以下四种资源：
     * `PersistentVolume` (非命名空间绑定)
