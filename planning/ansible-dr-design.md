@@ -52,47 +52,74 @@ graph TD
 **模式二: 周期性的主动同步 (Scheduled Proactive Sync)**
 ```mermaid
 graph TD
-    subgraph AAP Controller
+    subgraph "AAP Controller"
         A[Scheduler<br>CRON Job] -- Triggers Hourly --> B[Execute Periodic Sync Workflow];
     end
 
-    subgraph Ansible Execution
+    subgraph "Ansible Execution Flow"
         B --> C[Playbook: execute_periodic_sync.yml];
-        C --> D[Get All Resources from Primary Site<br>PV, PVC, VS, VSC];
-        D --> E{Loop & Sync};
-        E -- PV/PVC --> F[Role: periodic_storage_sync<br>1. rsync data<br>2. Modify & Apply PV/PVC to DR];
-        E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync VS/VSC Metadata];
         
-        C --> H[Get All Resources from DR Site<br>PV, PVC, VS, VSC];
-        H --> I{Compare Primary vs DR};
-        I -- Resource exists only in DR --> J[Delete Stale Resource from DR];
-        I -- Resource exists in both --> K[No Action];
+        subgraph "Phase 1: Sync from Primary to DR"
+            C --> D[Get All Resources from Primary Site<br>PV, PVC, VS, VSC];
+            D --> E{Loop & Sync Each Resource};
+            E -- PV/PVC --> F[Role: periodic_storage_sync<br>1. rsync data<br>2. Modify & Apply PV/PVC to DR];
+            E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync VS/VSC Metadata];
+        end
         
-        J --> L[Log Results & Generate Report];
-        K --> L;
-        F --> L;
-        G --> L;
+        %% Invisible node to manage flow
+        F --> FlowGate1;
+        G --> FlowGate1;
+        style FlowGate1 fill:#fff,stroke:#fff,stroke-width:0px
+
+        subgraph "Phase 2: Clean Stale Resources in DR"
+            FlowGate1 --> H[Get All Resources from DR Site<br>PV, PVC, VS, VSC];
+            H --> I{Compare Primary vs DR};
+            I -- Resource exists only in DR --> J[Delete Stale Resource from DR];
+            I -- Resource exists in both --> K[No Action];
+        end
+
+        %% Invisible node to manage flow
+        J --> FlowGate2;
+        K --> FlowGate2;
+        style FlowGate2 fill:#fff,stroke:#fff,stroke-width:0px
+
+        subgraph "Phase 3: Reporting"
+            FlowGate2 --> L[Log Results & Generate Report];
+        end
     end
 
     subgraph "DR Infrastructure"
-        F --> M[DR OCP Cluster];
-        J --> M;
-        G --> M;
+        M[DR OCP Cluster];
     end
 
-    style A fill:#e1e1e1,stroke:#333,stroke-width:2px
-    style B fill:#e1e1e1,stroke:#333,stroke-width:2px
-    style C fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style D fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style E fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style F fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style G fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style H fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style I fill:#ffcccc,stroke:#333,stroke-width:2px
-    style J fill:#f8d7da,stroke:#333,stroke-width:2px
-    style K fill:#d4edda,stroke:#333,stroke-width:2px
-    style L fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style M fill:#d4edda,stroke:#333,stroke-width:2px
+    %% Connections to external systems
+    F -- Modifies --> M;
+    G -- Modifies --> M;
+    J -- Modifies --> M;
+
+    %% Styling
+    style A fill:#f2f2f2,stroke:#333,stroke-width:1.5px
+    style B fill:#f2f2f2,stroke:#333,stroke-width:1.5px
+    
+    style C fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px
+    
+    %% Phase 1 styles
+    style D fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
+    style E fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
+    style F fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
+    style G fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
+
+    %% Phase 2 styles
+    style H fill:#ffecb3,stroke:#ff8f00,stroke-width:1.5px
+    style I fill:#ffecb3,stroke:#ff8f00,stroke-width:1.5px
+    style J fill:#f8d7da,stroke:#d9534f,stroke-width:1.5px
+    style K fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
+
+    %% Phase 3 styles
+    style L fill:#d1c4e9,stroke:#5e35b1,stroke-width:1.5px
+    
+    %% External system styles
+    style M fill:#b2dfdb,stroke:#00796b,stroke-width:2px
 ```
 
 **模式三: 手动灾备恢复 (Manual Failover)**
