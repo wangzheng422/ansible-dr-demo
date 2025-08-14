@@ -26,18 +26,26 @@
       ansible.builtin.set_fact:
         dr_pv_object: "{{ pv_object | combine({'spec': {'nfs': {'server': dr_nfs_server, 'path': dr_pv_path}}}, recursive=True) }}"
 
+    - name: "Clean up PV metadata for DR"
+      ansible.builtin.set_fact:
+        dr_pv_definition: "{{ dr_pv_object | combine({'metadata': dr_pv_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
+
     - name: "Create or Update PV on DR cluster"
       kubernetes.core.k8s:
         state: present
-        definition: "{{ dr_pv_object }}"
+        definition: "{{ dr_pv_definition }}"
         host: "{{ ocp_dr_api_server }}"
         api_key: "{{ ocp_dr_api_key }}"
         validate_certs: false
 
+    - name: "Clean up PVC metadata for DR"
+      ansible.builtin.set_fact:
+        dr_pvc_definition: "{{ pvc_object | combine({'metadata': pvc_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
+
     - name: "Create or Update PVC on DR cluster"
       kubernetes.core.k8s:
         state: present
-        definition: "{{ pvc_object }}"
+        definition: "{{ dr_pvc_definition }}"
         host: "{{ ocp_dr_api_server }}"
         api_key: "{{ ocp_dr_api_key }}"
         validate_certs: false

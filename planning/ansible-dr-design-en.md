@@ -53,17 +53,18 @@ graph TD
     end
 
     subgraph Ansible Execution
-        B --> C[Playbook: execute_periodic_sync.yml];
-        C --> D[Get All PVs & Snapshots<br>from Primary OCP];
-        D --> E{Loop through each PV};
-        E -- NFS PV --> F[Role: periodic_storage_sync<br>Execute rsync for PV directory via SSH];
-        D --> G{Loop through each Snapshot};
-        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata];
+        B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
+        C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
+        D --> E{Loop through each PV/PVC};
+        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS<br>2. Modify PV spec for DR<br>3. Clean PV/PVC metadata<br>4. Apply PV/PVC to DR OCP];
+        D --> G{Loop through each VS/VSC};
+        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data<br><b>Currently Skipped</b>];
         C --> I[Log Results & Generate Report];
     end
 
-    subgraph Storage
-        F --> J[DR NFS Server];
+    subgraph "DR Infrastructure"
+        F --> J[DR NFS Storage];
+        F --> L[DR OCP Cluster];
         H --> K[DR Metadata Store];
     end
 
@@ -78,6 +79,7 @@ graph TD
     style I fill:#e6f7ff,stroke:#333,stroke-width:2px
     style J fill:#d4edda,stroke:#333,stroke-width:2px
     style K fill:#d4edda,stroke:#333,stroke-width:2px
+    style L fill:#d4edda,stroke:#333,stroke-width:2px
 ```
 
 **Mode Three: Manual Failover**
@@ -251,17 +253,22 @@ This process is triggered periodically by AAP's scheduling function (Scheduler),
 
 1.  **Retrieve all relevant resources**:
     *   Connect to the primary OpenShift cluster (`ocp_primary`).
-    *   Use the `k8s_info` module to get a list of all `PersistentVolume` with `storageClassName` as `nfs-dynamic`.
-    *   Use the `k8s_info` module to get a list of all `VolumeSnapshot`.
+    *   Using the `k8s_info` module, iterate through the `target_namespaces` list to get all `PersistentVolumeClaim` and `VolumeSnapshot` resources.
+    *   Using the `k8s_info` module, get all related `PersistentVolume` and `VolumeSnapshotContent` resources.
 
-2.  **Iterate and synchronize PVs**:
-    *   In the Playbook, use a `loop` to iterate through the retrieved PV list.
-    *   For each PV, call the `periodic_storage_sync` role.
+2.  **Iterate and synchronize PVs/PVCs (Warm Standby)**:
+    *   In the Playbook, use a `loop` to iterate through the retrieved PVC list.
+    *   For each PVC, find its bound PV (`spec.volumeName`).
+    *   Call the `periodic_storage_sync` role, passing the PVC and PV objects.
     *   **Role Logic (`periodic_storage_sync`)**:
-        *   **Input**: A single `pv_object`.
-        *   **Construct Path**: Extract the source path from `pv_object.spec.nfs.path`. The destination path can be generated on the DR NFS server based on the source path.
-        *   **Execute Sync**: `delegate_to` the DR NFS server (`dr_nfs_server`), execute the `rsync -av --delete` command to ensure the DR side is completely consistent with the primary site's directory. **Note**: This requires that passwordless SSH access (using keys) is configured from the primary NFS server to the DR NFS server.
-        *   **Log Results**: Record the synchronization status of each PV (success, failure, discrepancy).
+        *   **Input**: `pvc_object` and `pv_object`.
+        *   **Step 1: Data Sync**: `delegate_to` the primary NFS server to execute `rsync` and sync data to the DR NFS server. **Note**: This requires passwordless SSH access from the primary to the DR NFS server.
+        *   **Step 2: Modify PV Definition**: In memory, modify the `pv_object` definition, pointing its `spec.nfs.server` to the DR NFS server.
+        *   **Step 3: Clean and Apply PV/PVC**:
+            *   **Clean Metadata**: Before applying to the DR cluster, you must clean cluster-specific metadata from the PV and PVC objects. This includes `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations`, and the `status` field.
+            *   **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to connect to the DR OpenShift cluster and `apply` the cleaned and modified PV definition and the cleaned PVC definition.
+        *   **Log Results**: Record the deployment status of each PV and PVC on the DR cluster.
+        *   **Note**: This "Warm Standby" mode means storage resources are pre-provisioned on the DR side, reducing recovery time.
 
 3.  **Iterate and synchronize VolumeSnapshots**:
     *   Similarly, use a `loop` to iterate through the retrieved `VolumeSnapshot` list.

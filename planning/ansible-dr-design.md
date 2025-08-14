@@ -60,9 +60,9 @@ graph TD
         B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
         C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
         D --> E{Loop through each PV/PVC};
-        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS via SSH<br>2. Modify PV spec<br>3. Apply PV/PVC to DR OCP];
+        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS<br>2. Modify PV spec for DR<br>3. Clean PV/PVC metadata<br>4. Apply PV/PVC to DR OCP];
         D --> G{Loop through each VS/VSC};
-        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data<br><b>(Currently Skipped)</b>];
+        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data<br><b>Currently Skipped</b>];
         C --> I[Log Results & Generate Report];
     end
 
@@ -328,11 +328,10 @@ ocp-v-dr-automation/
     *   **角色逻辑 (`periodic_storage_sync`)**:
         *   **输入**: `pvc_object` 和 `pv_object`。
         *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。**注意**: 此操作要求主 NFS 服务器 (`primary_nfs_server`) 与灾备 NFS 服务器 (`dr_nfs_server`) 之间已配置好基于密钥的 SSH 免密登录。
-        *   **第二步：修改并应用 PV**:
-            *   在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。
-            *   使用 `kubernetes.core.k8s` 模块，通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 变量连接到灾备 OpenShift 集群 (`ocp_dr`)，然后将修改后的 PV 定义 `apply` 到该集群。
-        *   **第三步：应用 PVC**:
-            *   使用 `kubernetes.core.k8s` 模块，同样通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 连接，将原始的 `pvc_object` 定义 `apply` 到灾备 OpenShift 集群的目标命名空间中。
+        *   **第二步：修改 PV 定义**: 在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。
+        *   **第三步：清理并应用 PV/PVC**:
+            *   **清理元数据**: 在应用到灾备集群前，必须清理 PV 和 PVC 对象中特定于源集群的元数据。这包括 `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations` 以及 `status` 字段。
+            *   **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块，通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 变量连接到灾备 OpenShift 集群 (`ocp_dr`)，然后将清理并修改后的 PV 定义以及清理后的 PVC 定义 `apply` 到该集群。
         *   **记录日志**: 记录每个 PV 和 PVC 在灾备集群上的部署状态。
         *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
 
