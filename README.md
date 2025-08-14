@@ -124,8 +124,10 @@ cd ~/git/ansible-dr-demo/
 
 ansible-rulebook \
 --rulebook rulebooks/ocp_dr_events_debug.yml \
+-i ocp-v-dr-automation/inventory/hosts.ini \
 -e ocp-v-dr-automation/group_vars/all.yml \
 -vvv
+
 
 ```
 
