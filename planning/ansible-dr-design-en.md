@@ -266,9 +266,9 @@ This process is triggered periodically by AAP's scheduling function (Scheduler),
         *   **Step 2: Modify PV Definition**: In memory, modify the `pv_object` definition, pointing its `spec.nfs.server` to the DR NFS server.
         *   **Step 3: Clean and Apply PV/PVC**:
             *   **Clean Metadata**: Before applying to the DR cluster, you must clean cluster-specific metadata from the PV and PVC objects. This includes `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations`, `metadata.ownerReferences`, and the `status` field.
-            *   **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to connect to the DR OpenShift cluster and `apply` the cleaned and modified PV definition and the cleaned PVC definition.
+            *   **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to connect to the DR OpenShift cluster and `apply` the cleaned and modified PV definition and the cleaned PVC definition. This may involve a `patch` operation if the resource already exists.
         *   **Log Results**: Record the deployment status of each PV and PVC on the DR cluster.
-        *   **Note**: This "Warm Standby" mode means storage resources are pre-provisioned on the DR side, reducing recovery time.
+        *   **Note**: This "Warm Standby" mode means storage resources are pre-provisioned on the DR side, reducing recovery time. The Service Account requires `patch` permissions on `persistentvolumes` and `persistentvolumeclaims` to support this.
 
 3.  **Iterate and synchronize VolumeSnapshots**:
     *   Similarly, use a `loop` to iterate through the retrieved `VolumeSnapshot` list.

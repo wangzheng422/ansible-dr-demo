@@ -111,10 +111,10 @@ metadata:
 rules:
 - apiGroups: [""] # Core API group
   resources: ["persistentvolumes", "persistentvolumeclaims"]
-  verbs: ["get", "list", "watch", "create"]
+  verbs: ["get", "list", "watch", "create", "patch"]
 - apiGroups: ["snapshot.storage.k8s.io"]
   resources: ["volumesnapshots", "volumesnapshotcontents"]
-  verbs: ["get", "list", "watch", "create"]
+  verbs: ["get", "list", "watch", "create", "patch"]
 EOF
 
 oc apply -f $BASE_DIR/data/install/eda-pv-event-reader.yaml
