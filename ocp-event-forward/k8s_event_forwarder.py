@@ -73,10 +73,11 @@ if __name__ == "__main__":
     snapshot_thread = threading.Thread(
         target=watch_kubernetes_resource,
         args=(
-            lambda: snapshot_v1_api.list_cluster_custom_object(
+            lambda **kwargs: snapshot_v1_api.list_cluster_custom_object(
                 group="snapshot.storage.k8s.io",
                 version="v1",
-                plural="volumesnapshots"
+                plural="volumesnapshots",
+                **kwargs
             ),
             "VolumeSnapshot"
         ),
