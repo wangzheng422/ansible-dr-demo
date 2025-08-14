@@ -167,135 +167,15 @@ ocp-v-dr-automation/
 
 #### Process 3-4: AAP EDA Rulebook and Logic Distribution
 
-*   **File**: rulebooks/ocp_dr_events.yml
+*   **File**: `rulebooks/ocp_dr_events.yml`
 *   **Logic Design**:
-```yaml
----
-- name: Process OCP DR Events from Webhook
-  hosts: localhost
-  sources:
-    - ansible.eda.webhook:
-        host: 0.0.0.0
-        port: 5000
-        # In AAP, a token must be configured to protect this webhook
-        # token: "{{ eda_webhook_token }}"
-
-  vars:
-    # Define the list of namespaces to sync, can be injected from outside
-    watched_namespaces:
-      - "app-ns1"
-      - "app-ns2"
-
-  rules:
-    # Rule 1: Handle PV creation and modification (non-namespaced resource)
-    - name: Handle PV Create or Update
-      condition: >
-        event.kind == "PersistentVolume" and
-        (event.type == "ADDED" or event.type == "MODIFIED")
-      action:
-        run_job_template:
-          name: "EDA - Sync PV to DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 2: Handle PV deletion (non-namespaced resource)
-    - name: Handle PV Deletion
-      condition: >
-        event.kind == "PersistentVolume" and
-        event.type == "DELETED"
-      action:
-        run_job_template:
-          name: "EDA - Delete PV from DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 3: Handle PVC creation and modification in monitored namespaces
-    - name: Handle PVC Create or Update in Watched Namespaces
-      condition: >
-        event.kind == "PersistentVolumeClaim" and
-        (event.type == "ADDED" or event.type == "MODIFIED") and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Sync PVC to DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 4: Handle PVC deletion in monitored namespaces
-    - name: Handle PVC Deletion in Watched Namespaces
-      condition: >
-        event.kind == "PersistentVolumeClaim" and
-        event.type == "DELETED" and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Delete PVC from DR"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 5: Handle VolumeSnapshot creation in monitored namespaces
-    - name: Handle VolumeSnapshot Creation in Watched Namespaces
-      condition: >
-        event.kind == "VolumeSnapshot" and
-        event.type == "ADDED" and
-        event.resource.metadata.namespace in watched_namespaces and
-        event.resource.status.readyToUse == true
-      action:
-        run_job_template:
-          name: "EDA - Sync VolumeSnapshot Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 6: Handle VolumeSnapshot deletion in monitored namespaces
-    - name: Handle VolumeSnapshot Deletion in Watched Namespaces
-      condition: >
-        event.kind == "VolumeSnapshot" and
-        event.type == "DELETED" and
-        event.resource.metadata.namespace in watched_namespaces
-      action:
-        run_job_template:
-          name: "EDA - Delete VolumeSnapshot Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 7: Handle VolumeSnapshotContent creation and modification (non-namespaced resource)
-    - name: Handle VolumeSnapshotContent Create or Update
-      condition: >
-        event.kind == "VolumeSnapshotContent" and
-        (event.type == "ADDED" or event.type == "MODIFIED")
-      action:
-        run_job_template:
-          name: "EDA - Sync VSC Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-
-    # Rule 8: Handle VolumeSnapshotContent deletion (non-namespaced resource)
-    - name: Handle VolumeSnapshotContent Deletion
-      condition: >
-        event.kind == "VolumeSnapshotContent" and
-        event.type == "DELETED"
-      action:
-        run_job_template:
-          name: "EDA - Delete VSC Metadata"
-          organization: "Default"
-          job_args:
-            extra_vars:
-              resource_object: "{{ event.resource }}"
-```
+    This rulebook listens for HTTP POST requests from the OCP event forwarder via `ansible.eda.webhook`. It defines a series of rules to trigger different AAP job templates based on the event type (`ADDED`, `MODIFIED`, `DELETED`) and resource type (`PersistentVolume`, `PersistentVolumeClaim`, `VolumeSnapshot`, `VolumeSnapshotContent`).
+    - **Core Variable**: `watched_namespaces` is used to define the list of namespaces to monitor.
+    - **Rule Categorization**:
+        - **Non-namespaced resources (PV, VSC)**: Directly handle their create, modify, and delete events.
+        - **Namespaced resources (PVC, VS)**: Before processing an event, check if the resource's namespace is in the `watched_namespaces` list.
+    - **Trigger Action**: When a rule matches, it calls the `run_job_template` action, passing the resource object from the event (`event.resource`) as `extra_vars` to the corresponding AAP job template (e.g., "EDA - Sync PV to DR" or "EDA - Delete PVC from DR"), thus starting the subsequent sync or cleanup process.
+    - **Special Handling for Snapshots**: For `VolumeSnapshot` creation events, the rule adds a condition to check `status.readyToUse == true`, ensuring the sync is triggered only when the snapshot is available.
 *   **Corresponding Playbooks**:
     *   Playbooks should now be more generic to handle different types of resource objects. For example, there could be a common `handle_resource_sync.yml` and `handle_resource_delete.yml` that receive a `resource_object` variable and call different roles or execute different logic based on `resource_object.kind`.
     *   **playbooks/event_driven/handle_resource_sync.yml**:
