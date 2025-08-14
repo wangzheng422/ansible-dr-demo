@@ -125,28 +125,54 @@ graph TD
 **模式三: 手动灾备恢复 (Manual Failover)**
 ```mermaid
 graph TD
-    I[Administrator] --> J[Execute Failover Workflow];
-    J --> K[Optional: Shut down VMs on Primary];
-    K --> L[Optional: Set Primary Storage Read-Only];
-    L --> M[Download OADP Backup from S3];
-    M --> N[Parse PV/PVC Definitions];
-    N --> O[Verify Data Directory on DR NFS];
-    O --> Q[Apply OADP Restore<br>exclude PV/PVC];
-    Q --> R[Verify VM Status on DR OCP];
-    R --> T[Clean Up Temporary Files];
-    T --> U[Generate Report];
+    subgraph "启动与准备"
+        Admin["fa:fa-user Administrator"] -- Triggers --> StartWorkflow["Execute Failover Workflow"];
+    end
 
-    style I fill:#d4edda,stroke:#333,stroke-width:2px
-    style J fill:#d4edda,stroke:#333,stroke-width:2px
-    style K fill:#d4edda,stroke:#333,stroke-width:2px
-    style L fill:#d4edda,stroke:#333,stroke-width:2px
-    style M fill:#d4edda,stroke:#333,stroke-width:2px
-    style N fill:#d4edda,stroke:#333,stroke-width:2px
-    style O fill:#d4edda,stroke:#333,stroke-width:2px
-    style Q fill:#d4edda,stroke:#333,stroke-width:2px
-    style R fill:#d4edda,stroke:#333,stroke-width:2px
-    style T fill:#d4edda,stroke:#333,stroke-width:2px
-    style U fill:#d4edda,stroke:#333,stroke-width:2px
+    subgraph "灾备执行"
+        %% direction TD
+        ShutdownVMs["Optional: Shut down VMs on Primary"]
+        StorageRO["Optional: Set Primary Storage Read-Only"]
+        DownloadBackup["Download OADP Backup from S3"]
+        ParseDefs["Parse PV/PVC Definitions"]
+        VerifyData["Verify Data Directory on DR NFS"]
+        ApplyRestore["Apply OADP Restore<br>exclude PV/PVC"]
+    end
+    
+    subgraph "验证与收尾"
+        %% direction TD
+        VerifyVMs["Verify VM Status on DR OCP"]
+        Cleanup["Clean Up Temporary Files"]
+        Report["Generate Report"]
+    end
+
+    StartWorkflow --> ShutdownVMs;
+    ShutdownVMs --> StorageRO;
+    StorageRO --> DownloadBackup;
+    DownloadBackup --> ParseDefs;
+    ParseDefs --> VerifyData;
+    VerifyData --> ApplyRestore;
+    ApplyRestore --> VerifyVMs;
+    VerifyVMs --> Cleanup;
+    Cleanup --> Report;
+
+    %% Styling
+    %% Phase 1: Initiation
+    style Admin fill:#f9f9f9,stroke:#333,stroke-width:2px
+    style StartWorkflow fill:#cce5ff,stroke:#6c8ebf,stroke-width:2px
+    
+    %% Phase 2: Execution
+    style ShutdownVMs fill:#fff0c1,stroke:#ff8f00,stroke-width:1.5px
+    style StorageRO fill:#fff0c1,stroke:#ff8f00,stroke-width:1.5px
+    style DownloadBackup fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
+    style ParseDefs fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
+    style VerifyData fill:#ffe6cc,stroke:#d9534f,stroke-width:1.5px
+    style ApplyRestore fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
+
+    %% Phase 3: Verification & Finalization
+    style VerifyVMs fill:#ffe6cc,stroke:#d9534f,stroke-width:1.5px
+    style Cleanup fill:#e6e6e6,stroke:#5e35b1,stroke-width:1.5px
+    style Report fill:#e6e6e6,stroke:#5e35b1,stroke-width:1.5px
 ```
 
 ### **3\. Ansible 项目结构设计 (集成 EDA)**
