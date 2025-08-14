@@ -62,6 +62,10 @@ ansible-galaxy collection install sabre1041.eda ansible.eda
 
 ansible-galaxy collection install -r requirements.yml
 
+sudo dnf install -y java-17-openjdk-devel
+
+sudo alternatives --config java
+
 cd ~/git/ansible-dr-demo/ocp-v-dr-automation
 
 ```
@@ -85,6 +89,28 @@ playbooks/scheduled/execute_periodic_sync.yml \
 cd ~/git/ansible-dr-demo/ocp-event-forward
 
 podman build -t quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v01 -f Dockerfile
+
+podman push quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v01
+
+```
+
+## run eda on ocp for testing
+
+```bash
+
+oc new-project eda
+
+cd ~/git/ansible-dr-demo/ocp-event-forward
+
+cat rbac.yaml | oc apply -f -
+
+cat deployment.yaml | \
+sed "s#quay.io/your-repo/eda-k8s-event-forwarder:latest#quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v01#g" | \
+sed "s#http://your-eda-webhook-url:port#http://192.168.99.1:5000#g" | \
+oc apply -f -
+
+
+
 
 ```
 
