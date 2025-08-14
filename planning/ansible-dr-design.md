@@ -23,156 +23,159 @@
 **模式一: 事件驱动的实时复制 (Event-Driven Replication)**
 ```mermaid
 graph TD
-    subgraph "Primary OCP Cluster (Monitored Namespaces)"
-        A[Kubernetes API Server]
+    subgraph "Event Source"
+        A["fa:fa-server Kubernetes API Server<br><div style='font-size:smaller; font-style:italic'>Primary OCP Cluster</div>"]
     end
 
-    A --> B{Events<br>PV, PVC, VolumeSnapshot, VolumeSnapshotContent<br>ADDED/MODIFIED/DELETED};
-    B --> C[Python Event Forwarder<br>Filters by Namespace];
-    C -- HTTP POST with Namespace info --> D[AAP EDA Controller<br>ansible.eda.webhook];
-    D --> E{Rulebook Matches Condition};
-    E -- PV/PVC ADDED/MODIFIED --> F[Sync Data e.g., rsync];
-    F --> G[DR Storage];
-    E -- PV/PVC DELETED --> H[Delete Data on DR Storage];
-    E -- VolumeSnapshot/Content ADDED --> S1[Sync Snapshot Metadata & Data];
-    E -- VolumeSnapshot/Content DELETED --> S2[Delete Snapshot Metadata & Data];
+    subgraph "Event Pipeline"
+        B{"fa:fa-envelope-open-text K8s Events<br><div style='font-size:smaller; font-style:italic'>PV, PVC, VS, VSC<br>ADDED/MODIFIED/DELETED</div>"}
+        C["fa:fa-route Python Event Forwarder<br><div style='font-size:smaller; font-style:italic'>Filters by Namespace</div>"]
+        D["fa:fa-cogs AAP EDA Controller<br><div style='font-size:smaller; font-style:italic'>Receives Webhook</div>"]
+    end
 
-    style A fill:#cce5ff,stroke:#333,stroke-width:2px
-    style B fill:#cce5ff,stroke:#333,stroke-width:2px
-    style C fill:#cce5ff,stroke:#333,stroke-width:2px
-    style D fill:#cce5ff,stroke:#333,stroke-width:2px
-    style E fill:#cce5ff,stroke:#333,stroke-width:2px
-    style F fill:#cce5ff,stroke:#333,stroke-width:2px
-    style G fill:#d4edda,stroke:#333,stroke-width:2px
-    style H fill:#f8d7da,stroke:#333,stroke-width:2px
-    style S1 fill:#cce5ff,stroke:#333,stroke-width:2px
-    style S2 fill:#f8d7da,stroke:#333,stroke-width:2px
+    subgraph "Decision & Actions"
+        E{"fa:fa-code-branch Rulebook Evaluation"}
+        
+        subgraph "PV/PVC Actions"
+            F["fa:fa-sync-alt Sync Data<br><div style='font-size:smaller; font-style:italic'>rsync</div>"]
+            H["fa:fa-trash-alt Delete Data"]
+        end
+        
+        subgraph "VolumeSnapshot Actions"
+            S1["fa:fa-copy Sync Snapshot<br><div style='font-size:smaller; font-style:italic'>Metadata & Data</div>"]
+            S2["fa:fa-eraser Delete Snapshot"]
+        end
+    end
+
+    subgraph "DR Destination"
+        G["fa:fa-database DR Storage"]
+    end
+
+    A -- Generates --> B
+    B -- Watched by --> C
+    C -- "HTTP POST" --> D
+    D -- Triggers --> E
+
+    E -- "PV/PVC<br>ADDED/MODIFIED" --> F --> G
+    E -- "PV/PVC<br>DELETED" --> H
+    E -- "VolumeSnapshot<br>ADDED" --> S1 --> G
+    E -- "VolumeSnapshot<br>DELETED" --> S2
+
+    classDef source fill:#cce5ff,stroke:#333,stroke-width:2px;
+    classDef pipeline fill:#e0e0e0,stroke:#333,stroke-width:1.5px;
+    classDef decision fill:#fff59d,stroke:#333,stroke-width:2px;
+    classDef action_sync fill:#d4edda,stroke:#155724,stroke-width:2px,color:#155724;
+    classDef action_delete fill:#f8d7da,stroke:#721c24,stroke-width:2px,color:#721c24;
+    classDef storage fill:#d1ecf1,stroke:#0c5460,stroke-width:2px;
+
+    class A source;
+    class B,C,D pipeline;
+    class E decision;
+    class F,S1 action_sync;
+    class H,S2 action_delete;
+    class G storage;
 ```
 
 **模式二: 周期性的主动同步 (Scheduled Proactive Sync)**
 ```mermaid
 graph TD
-    subgraph "AAP Controller"
-        A[Scheduler<br>CRON Job] -- Triggers Hourly --> B[Execute Periodic Sync Workflow];
+    subgraph "Scheduler"
+        A["fa:fa-clock CRON Job<br><div style='font-size:smaller; font-style:italic'>Triggers Hourly</div>"] --> B["fa:fa-play-circle Execute Workflow<br><div style='font-size:smaller; font-style:italic'>Periodic Sync</div>"];
     end
 
-    subgraph "Ansible Execution Flow"
-        B --> C[Playbook: execute_periodic_sync.yml];
-        
-        subgraph "Phase 1: Sync from Primary to DR"
-            C --> D[Get All Resources from Primary Site<br>PV, PVC, VS, VSC];
-            D --> E{Loop & Sync Each Resource};
-            E -- PV/PVC --> F[Role: periodic_storage_sync<br>1. rsync data<br>2. Modify & Apply PV/PVC to DR];
-            E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync VS/VSC Metadata];
-        end
-        
-        %% Invisible node to manage flow
-        F --> FlowGate1;
-        G --> FlowGate1;
-        style FlowGate1 fill:#fff,stroke:#fff,stroke-width:0px
-
-        subgraph "Phase 2: Clean Stale Resources in DR"
-            FlowGate1 --> H[Get All Resources from DR Site<br>PV, PVC, VS, VSC];
-            H --> I{Compare Primary vs DR};
-            I -- Resource exists only in DR --> J[Delete Stale Resource from DR];
-            I -- Resource exists in both --> K[No Action];
+    subgraph "Execution Flow"
+        subgraph "Phase 1: Sync Primary to DR"
+            direction LR
+            C["fa:fa-list-alt Get Resources<br><div style='font-size:smaller; font-style:italic'>From Primary OCP</div>"] --> D{"fa:fa-sync Loop & Sync"};
+            D -- "PV/PVC" --> E["fa:fa-copy Sync Storage<br><div style='font-size:smaller; font-style:italic'>rsync & apply PV/PVC</div>"];
+            D -- "VS/VSC" --> F["fa:fa-file-alt Sync Metadata<br><div style='font-size:smaller; font-style:italic'>Apply VS/VSC</div>"];
         end
 
-        %% Invisible node to manage flow
-        J --> FlowGate2;
-        K --> FlowGate2;
-        style FlowGate2 fill:#fff,stroke:#fff,stroke-width:0px
+        subgraph "Phase 2: Clean Stale Resources"
+            direction LR
+            G["fa:fa-list-alt Get Resources<br><div style='font-size:smaller; font-style:italic'>From DR OCP</div>"] --> H{"fa:fa-exchange-alt Compare<br><div style='font-size:smaller; font-style:italic'>Primary vs DR</div>"};
+            H -- "Exists only in DR" --> I["fa:fa-trash-alt Delete Stale Resource"];
+            H -- "Exists in both" --> J["fa:fa-check-circle No Action"];
+        end
 
         subgraph "Phase 3: Reporting"
-            FlowGate2 --> L[Log Results & Generate Report];
+            K["fa:fa-file-invoice Generate Report<br><div style='font-size:smaller; font-style:italic'>Log Sync & Clean Results</div>"]
         end
     end
 
-    subgraph "DR Infrastructure"
-        M[DR OCP Cluster];
+    B --> C;
+    E --> G;
+    F --> G;
+    I --> K;
+    J --> K;
+
+    subgraph "Interacting Systems"
+        PrimaryOCP["fa:fa-server Primary OCP"]
+        DROCP["fa:fa-server DR OCP"]
     end
 
-    %% Connections to external systems
-    F -- Modifies --> M;
-    G -- Modifies --> M;
-    J -- Modifies --> M;
+    C -- Reads from --> PrimaryOCP;
+    E -- Writes to --> DROCP;
+    F -- Writes to --> DROCP;
+    G -- Reads from --> DROCP;
+    I -- Writes to --> DROCP;
 
-    %% Styling
-    style A fill:#f2f2f2,stroke:#333,stroke-width:1.5px
-    style B fill:#f2f2f2,stroke:#333,stroke-width:1.5px
-    
-    style C fill:#dae8fc,stroke:#6c8ebf,stroke-width:2px
-    
-    %% Phase 1 styles
-    style D fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
-    style E fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
-    style F fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
-    style G fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px
+    classDef scheduler fill:#f2f2f2,stroke:#333,stroke-width:1.5px;
+    classDef phase1 fill:#e1f5fe,stroke:#0288d1,stroke-width:1.5px;
+    classDef phase2 fill:#ffecb3,stroke:#ff8f00,stroke-width:1.5px;
+    classDef phase3 fill:#d1c4e9,stroke:#5e35b1,stroke-width:1.5px;
+    classDef system fill:#b2dfdb,stroke:#00796b,stroke-width:2px;
+    classDef delete fill:#f8d7da,stroke:#d9534f,stroke-width:1.5px;
+    classDef no_action fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px;
 
-    %% Phase 2 styles
-    style H fill:#ffecb3,stroke:#ff8f00,stroke-width:1.5px
-    style I fill:#ffecb3,stroke:#ff8f00,stroke-width:1.5px
-    style J fill:#f8d7da,stroke:#d9534f,stroke-width:1.5px
-    style K fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
-
-    %% Phase 3 styles
-    style L fill:#d1c4e9,stroke:#5e35b1,stroke-width:1.5px
-    
-    %% External system styles
-    style M fill:#b2dfdb,stroke:#00796b,stroke-width:2px
+    class A,B scheduler;
+    class C,D,E,F phase1;
+    class G,H phase2;
+    class I delete;
+    class J no_action;
+    class K phase3;
+    class PrimaryOCP,DROCP system;
 ```
 
 **模式三: 手动灾备恢复 (Manual Failover)**
 ```mermaid
 graph TD
-    subgraph "启动与准备"
-        Admin["fa:fa-user Administrator"] -- Triggers --> StartWorkflow["Execute Failover Workflow"];
+    subgraph "Initiation"
+        Admin["fa:fa-user Administrator"] -- Triggers --> Start["fa:fa-play-circle Execute Failover Workflow"];
     end
 
-    subgraph "灾备执行"
-        %% direction TD
-        ShutdownVMs["Optional: Shut down VMs on Primary"]
-        StorageRO["Optional: Set Primary Storage Read-Only"]
-        DownloadBackup["Download OADP Backup from S3"]
-        ParseDefs["Parse PV/PVC Definitions"]
-        VerifyData["Verify Data Directory on DR NFS"]
-        ApplyRestore["Apply OADP Restore<br>exclude PV/PVC"]
-    end
-    
-    subgraph "验证与收尾"
-        %% direction TD
-        VerifyVMs["Verify VM Status on DR OCP"]
-        Cleanup["Clean Up Temporary Files"]
-        Report["Generate Report"]
+    subgraph "Phase 1: Pre-Failover (Optional)"
+        direction LR
+        A["fa:fa-power-off Shut down VMs<br><div style='font-size:smaller; font-style:italic'>on Primary Site</div>"]
+        B["fa:fa-lock Set Storage Read-Only<br><div style='font-size:smaller; font-style:italic'>on Primary Site</div>"]
     end
 
-    StartWorkflow --> ShutdownVMs;
-    ShutdownVMs --> StorageRO;
-    StorageRO --> DownloadBackup;
-    DownloadBackup --> ParseDefs;
-    ParseDefs --> VerifyData;
-    VerifyData --> ApplyRestore;
-    ApplyRestore --> VerifyVMs;
-    VerifyVMs --> Cleanup;
-    Cleanup --> Report;
+    subgraph "Phase 2: Restore on DR Site"
+        C["fa:fa-download Download OADP Backup<br><div style='font-size:smaller; font-style:italic'>from S3</div>"]
+        D["fa:fa-file-code Parse Definitions<br><div style='font-size:smaller; font-style:italic'>PV, PVC, etc.</div>"]
+        E["fa:fa-check-double Verify Data<br><div style='font-size:smaller; font-style:italic'>on DR NFS</div>"]
+        F["fa:fa-upload Apply OADP Restore<br><div style='font-size:smaller; font-style:italic'>Excluding Storage</div>"]
+    end
 
-    %% Styling
-    %% Phase 1: Initiation
-    style Admin fill:#f9f9f9,stroke:#333,stroke-width:2px
-    style StartWorkflow fill:#cce5ff,stroke:#6c8ebf,stroke-width:2px
-    
-    %% Phase 2: Execution
-    style ShutdownVMs fill:#fff0c1,stroke:#ff8f00,stroke-width:1.5px
-    style StorageRO fill:#fff0c1,stroke:#ff8f00,stroke-width:1.5px
-    style DownloadBackup fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
-    style ParseDefs fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
-    style VerifyData fill:#ffe6cc,stroke:#d9534f,stroke-width:1.5px
-    style ApplyRestore fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px
+    subgraph "Phase 3: Verification & Finalization"
+        G["fa:fa-server Verify VM Status<br><div style='font-size:smaller; font-style:italic'>on DR OCP</div>"]
+        H["fa:fa-broom Clean Up<br><div style='font-size:smaller; font-style:italic'>Temporary Files</div>"]
+        I["fa:fa-file-alt Generate Report"]
+    end
 
-    %% Phase 3: Verification & Finalization
-    style VerifyVMs fill:#ffe6cc,stroke:#d9534f,stroke-width:1.5px
-    style Cleanup fill:#e6e6e6,stroke:#5e35b1,stroke-width:1.5px
-    style Report fill:#e6e6e6,stroke:#5e35b1,stroke-width:1.5px
+    Start --> A --> B --> C --> D --> E --> F --> G --> H --> I;
+
+    classDef initiation fill:#cce5ff,stroke:#6c8ebf,stroke-width:2px;
+    classDef pre_failover fill:#fff0c1,stroke:#ff8f00,stroke-width:1.5px;
+    classDef restore fill:#d4edda,stroke:#5cb85c,stroke-width:1.5px;
+    classDef verification fill:#e6e6e6,stroke:#5e35b1,stroke-width:1.5px;
+    classDef critical_check fill:#ffe6cc,stroke:#d9534f,stroke-width:1.5px;
+
+    class Admin,Start initiation;
+    class A,B pre_failover;
+    class C,D,F restore;
+    class E,G critical_check;
+    class H,I verification;
 ```
 
 ### **3\. Ansible 项目结构设计 (集成 EDA)**
