@@ -62,7 +62,7 @@ graph TD
         D --> E{Loop through each PV/PVC};
         E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS via SSH<br>2. Modify PV spec<br>3. Apply PV/PVC to DR OCP];
         D --> G{Loop through each VS/VSC};
-        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data];
+        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data<br><b>(Currently Skipped)</b>];
         C --> I[Log Results & Generate Report];
     end
 
@@ -337,6 +337,7 @@ ocp-v-dr-automation/
         *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
 
 3.  **遍历并同步 VolumeSnapshot/VolumeSnapshotContent**:
+    *   **注意**: 当前版本的实现暂时跳过了此部分功能，以集中关注 PV 和 PVC 的同步。以下为原设计逻辑，将在未来版本中恢复。
     *   同样使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
     *   对于每一个 VolumeSnapshot，找到其绑定的 `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`)。
     *   调用 `periodic_storage_sync` 角色（或专门的角色），传入 VS 和 VSC 对象。
