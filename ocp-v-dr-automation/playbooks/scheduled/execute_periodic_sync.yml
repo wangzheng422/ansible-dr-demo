@@ -114,6 +114,38 @@
       ansible.builtin.set_fact:
         primary_pv_names: "{{ all_pvs.resources | map(attribute='metadata.name') | list }}"
 
+    - name: "Get all VolumeSnapshots from DR site target namespaces"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshot
+        namespace: "{{ item }}"
+      loop: "{{ target_namespaces }}"
+      register: dr_vs_results
+
+    - name: "Flatten the list of DR VolumeSnapshots"
+      ansible.builtin.set_fact:
+        dr_all_snapshots: "{{ dr_vs_results.results | map(attribute='resources') | flatten }}"
+
+    - name: "Get all VolumeSnapshotContents from DR site"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshotContent
+      register: dr_all_vscs
+
+    - name: "Create a list of primary VolumeSnapshot names"
+      ansible.builtin.set_fact:
+        primary_snapshot_names: "{{ all_snapshots | map(attribute='metadata.name') | list }}"
+
+    - name: "Create a list of primary VolumeSnapshotContent names"
+      ansible.builtin.set_fact:
+        primary_vsc_names: "{{ all_vscs.resources | map(attribute='metadata.name') | list }}"
+
     # Compare and delete stale resources on DR site
     - name: "Delete stale PVCs from DR site"
       kubernetes.core.k8s:
@@ -143,6 +175,35 @@
       loop_control:
         label: "PV {{ item.metadata.name }}"
       when: item.metadata.name not in primary_pv_names
+
+    - name: "Delete stale VolumeSnapshots from DR site"
+      kubernetes.core.k8s:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        state: absent
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshot
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ item.metadata.namespace }}"
+      loop: "{{ dr_all_snapshots }}"
+      loop_control:
+        label: "VS {{ item.metadata.namespace }}/{{ item.metadata.name }}"
+      when: item.metadata.name not in primary_snapshot_names
+
+    - name: "Delete stale VolumeSnapshotContents from DR site"
+      kubernetes.core.k8s:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        state: absent
+        api_version: snapshot.storage.k8s.io/v1
+        kind: VolumeSnapshotContent
+        name: "{{ item.metadata.name }}"
+      loop: "{{ dr_all_vscs.resources }}"
+      loop_control:
+        label: "VSC {{ item.metadata.name }}"
+      when: item.metadata.name not in primary_vsc_names
 
     - name: "Generate Sync Report"
       ansible.builtin.debug:

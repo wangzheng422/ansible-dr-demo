@@ -61,15 +61,30 @@
       ansible.builtin.debug:
         msg: "Starting metadata sync for VS {{ snapshot_object.metadata.namespace }}/{{ snapshot_object.metadata.name }} -> VSC {{ content_object.metadata.name }}"
 
-    # - name: "Sync VS and VSC metadata to DR metadata store"
-    #   ansible.builtin.copy:
-    #     content: "{{ item.content | to_nice_yaml }}"
-    #     dest: "{{ dr_metadata_path }}/{{ item.kind }}-{{ item.name }}.yml"
-    #   loop:
-    #     - { name: "{{ snapshot_object.metadata.name }}", content: "{{ snapshot_object }}", kind: "vs" }
-    #     - { name: "{{ content_object.metadata.name }}", content: "{{ content_object }}", kind: "vsc" }
-    #   delegate_to: localhost
+    - name: "Clean up VolumeSnapshot metadata for DR"
+      ansible.builtin.set_fact:
+        dr_snapshot_definition: "{{ snapshot_object | combine({'metadata': snapshot_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
+
+    - name: "Clean up VolumeSnapshotContent metadata for DR"
+      ansible.builtin.set_fact:
+        dr_content_definition: "{{ content_object | combine({'metadata': content_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'spec': content_object.spec | combine({'source': {'volumeHandle': omit}})}) | combine({'status': omit}) }}"
+
+    - name: "Create or Update VolumeSnapshot on DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ dr_snapshot_definition }}"
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+
+    - name: "Create or Update VolumeSnapshotContent on DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ dr_content_definition }}"
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
 
     - name: "Log snapshot metadata sync status"
       ansible.builtin.debug:
-        msg: "Successfully synced metadata for VolumeSnapshot {{ snapshot_object.metadata.name }} and its content. (Note: Sync logic is currently disabled)"
+        msg: "Successfully synced metadata for VolumeSnapshot {{ snapshot_object.metadata.name }} and its content."

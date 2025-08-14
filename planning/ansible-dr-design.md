@@ -61,7 +61,7 @@ graph TD
         C --> D[Get All Resources from Primary Site<br>PV, PVC, VS, VSC];
         D --> E{Loop & Sync};
         E -- PV/PVC --> F[Role: periodic_storage_sync<br>1. rsync data<br>2. Modify & Apply PV/PVC to DR];
-        E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync Snapshots .Skipped.];
+        E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync VS/VSC Metadata];
         
         C --> H[Get All Resources from DR Site<br>PV, PVC, VS, VSC];
         H --> I{Compare Primary vs DR};
@@ -70,11 +70,14 @@ graph TD
         
         J --> L[Log Results & Generate Report];
         K --> L;
+        F --> L;
+        G --> L;
     end
 
     subgraph "DR Infrastructure"
         F --> M[DR OCP Cluster];
         J --> M;
+        G --> M;
     end
 
     style A fill:#e1e1e1,stroke:#333,stroke-width:2px
@@ -219,14 +222,16 @@ ocp-v-dr-automation/
     *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
 
 #### 5.3 遍历并同步 VolumeSnapshot/VolumeSnapshotContent
-*   **注意**: 当前版本的实现暂时跳过了此部分功能，以集中关注 PV 和 PVC 的同步。以下为原设计逻辑，将在未来版本中恢复。
-*   同样使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
-*   对于每一个 VolumeSnapshot，找到其绑定的 `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`)。
-*   调用 `periodic_storage_sync` 角色（或专门的角色），传入 VS 和 VSC 对象。
+*   此功能现已实现，用于将快照的元数据同步到灾备站点。
+*   Playbook 使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
+*   对于每一个 `VolumeSnapshot` (且 `status.readyToUse == true`)，找到其绑定的 `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`)。
+*   调用 `periodic_storage_sync` 角色，并传入 `snapshot_object` 和 `content_object` 变量。
 *   **角色逻辑**:
     *   **输入**: `snapshot_object` 和 `content_object`。
-    *   **同步元数据**: 将 VS 和 VSC 的定义同步到灾备端的元数据存储。
-    *   **同步快照数据**: 根据 `content_object.spec.source` 确定快照数据的位置并执行同步。
+    *   **核心功能：元数据同步**: 此角色的主要任务是同步 Kubernetes 资源对象，确保灾备集群了解这些快照的存在。
+    *   **清理元数据**: 在应用到灾备集群前，角色会清理 `VolumeSnapshot` 和 `VolumeSnapshotContent` 对象中特定于源集群的元数据。这包括 `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations` 和 `status` 字段。
+    *   **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块，将清理后的 `VolumeSnapshot` 和 `VolumeSnapshotContent` 定义 `apply` 到灾备 OpenShift 集群。
+    *   **数据同步说明**: 当前实现专注于元数据的同步。快照的底层数据（例如，NFS 上的 `.snapshot` 目录中的实际数据）被假定由存储层的其他机制（如存储阵列复制或带 `rsync` 的自定义逻辑）进行同步。Ansible 角色本身不执行快照数据的 `rsync`。
 
 #### 5.4 清理灾备站点多余资源
 *   在同步完主站点的所有资源后，Playbook 会执行反向检查。
