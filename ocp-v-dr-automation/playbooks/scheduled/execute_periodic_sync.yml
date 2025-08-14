@@ -76,6 +76,74 @@
         label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
       when: item.status is defined and item.status.boundVolumeSnapshotContentName is defined and item.status.readyToUse | default(false)
 
+    - name: "-------------------- Cleanup DR Site --------------------"
+      ansible.builtin.debug:
+        msg: "Starting cleanup of stale resources on the DR site."
+
+    # Get resources from DR site
+    - name: "Get all PersistentVolumeClaims from DR site target namespaces"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        api_version: v1
+        kind: PersistentVolumeClaim
+        namespace: "{{ item }}"
+      loop: "{{ target_namespaces }}"
+      register: dr_pvc_results
+
+    - name: "Flatten the list of DR PVCs"
+      ansible.builtin.set_fact:
+        dr_all_pvcs: "{{ dr_pvc_results.results | map(attribute='resources') | flatten }}"
+
+    - name: "Get all PersistentVolumes from DR site"
+      kubernetes.core.k8s_info:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        api_version: v1
+        kind: PersistentVolume
+      register: dr_all_pvs
+
+    # Create lists of names from the primary site for easier comparison
+    - name: "Create a list of primary PVC names"
+      ansible.builtin.set_fact:
+        primary_pvc_names: "{{ all_pvcs | map(attribute='metadata.name') | list }}"
+
+    - name: "Create a list of primary PV names"
+      ansible.builtin.set_fact:
+        primary_pv_names: "{{ all_pvs.resources | map(attribute='metadata.name') | list }}"
+
+    # Compare and delete stale resources on DR site
+    - name: "Delete stale PVCs from DR site"
+      kubernetes.core.k8s:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        state: absent
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ item.metadata.namespace }}"
+      loop: "{{ dr_all_pvcs }}"
+      loop_control:
+        label: "PVC {{ item.metadata.namespace }}/{{ item.metadata.name }}"
+      when: item.metadata.name not in primary_pvc_names
+
+    - name: "Delete stale PVs from DR site"
+      kubernetes.core.k8s:
+        host: "{{ ocp_dr_api_server }}"
+        api_key: "{{ ocp_dr_api_key }}"
+        validate_certs: false
+        state: absent
+        api_version: v1
+        kind: PersistentVolume
+        name: "{{ item.metadata.name }}"
+      loop: "{{ dr_all_pvs.resources }}"
+      loop_control:
+        label: "PV {{ item.metadata.name }}"
+      when: item.metadata.name not in primary_pv_names
+
     - name: "Generate Sync Report"
       ansible.builtin.debug:
-        msg: "Periodic sync completed. Synced {{ all_pvcs | length }} PVCs and {{ all_snapshots | length }} snapshots from namespaces [{{ target_namespaces | join(', ') }}]."
+        msg: "Periodic sync completed. Synced {{ all_pvcs | length }} PVCs and {{ all_snapshots | length }} snapshots from namespaces [{{ target_namespaces | join(', ') }}]. Cleanup of DR site is also finished."

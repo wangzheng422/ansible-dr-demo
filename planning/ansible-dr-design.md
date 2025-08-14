@@ -57,19 +57,24 @@ graph TD
     end
 
     subgraph Ansible Execution
-        B --> C[Playbook: execute_periodic_sync.yml<br>Vars: target_namespaces: 'ns1', 'ns2'];
-        C --> D[Get All Resources<br>PV, PVC, VS, VSC<br>from specified namespaces];
-        D --> E{Loop through each PV/PVC};
-        E -- NFS based --> F[Role: periodic_storage_sync<br>1. rsync data to DR NFS<br>2. Modify PV spec for DR<br>3. Clean PV/PVC metadata<br>4. Apply PV/PVC to DR OCP];
-        D --> G{Loop through each VS/VSC};
-        G --> H[Role: periodic_storage_sync<br>Sync Snapshot Metadata & Data<br><b>Currently Skipped</b>];
-        C --> I[Log Results & Generate Report];
+        B --> C[Playbook: execute_periodic_sync.yml];
+        C --> D[Get All Resources from Primary Site<br>PV, PVC, VS, VSC];
+        D --> E{Loop & Sync};
+        E -- PV/PVC --> F[Role: periodic_storage_sync<br>1. rsync data<br>2. Modify & Apply PV/PVC to DR];
+        E -- VS/VSC --> G[Role: periodic_storage_sync<br>Sync Snapshots .Skipped.];
+        
+        C --> H[Get All Resources from DR Site<br>PV, PVC, VS, VSC];
+        H --> I{Compare Primary vs DR};
+        I -- Resource exists only in DR --> J[Delete Stale Resource from DR];
+        I -- Resource exists in both --> K[No Action];
+        
+        J --> L[Log Results & Generate Report];
+        K --> L;
     end
 
     subgraph "DR Infrastructure"
-        F --> J[DR NFS Storage];
-        F --> L[DR OCP Cluster];
-        H --> K[DR Metadata Store];
+        F --> M[DR OCP Cluster];
+        J --> M;
     end
 
     style A fill:#e1e1e1,stroke:#333,stroke-width:2px
@@ -80,10 +85,11 @@ graph TD
     style F fill:#e6f7ff,stroke:#333,stroke-width:2px
     style G fill:#e6f7ff,stroke:#333,stroke-width:2px
     style H fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style I fill:#e6f7ff,stroke:#333,stroke-width:2px
-    style J fill:#d4edda,stroke:#333,stroke-width:2px
+    style I fill:#ffcccc,stroke:#333,stroke-width:2px
+    style J fill:#f8d7da,stroke:#333,stroke-width:2px
     style K fill:#d4edda,stroke:#333,stroke-width:2px
-    style L fill:#d4edda,stroke:#333,stroke-width:2px
+    style L fill:#e6f7ff,stroke:#333,stroke-width:2px
+    style M fill:#d4edda,stroke:#333,stroke-width:2px
 ```
 
 **模式三: 手动灾备恢复 (Manual Failover)**
@@ -224,7 +230,7 @@ ocp-v-dr-automation/
 
 #### 5.4 清理灾备站点多余资源
 *   在同步完主站点的所有资源后，Playbook 会执行反向检查。
-*   它会获取灾备站点指定命名空间内的所有相关资源（PV, PVC 等）。
+*   它会获取灾备站点指定命名空间内的所有相关资源（PV, PVC, VolumeSnapshot, VolumeSnapshotContent 等）。
 *   将灾备站点的资源列表与主站点的资源列表进行比较。
 *   如果发现某个资源存在于灾备站点但不存在于主站点，则认为该资源是多余的（已在主站删除），并会在灾备站点上将其删除。
 *   所有删除操作都会被记录。
