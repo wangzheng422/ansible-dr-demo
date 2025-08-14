@@ -40,7 +40,7 @@
 
     - name: "Clean up PVC metadata for DR"
       ansible.builtin.set_fact:
-        dr_pvc_definition: "{{ pvc_object | combine({'metadata': pvc_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit})}) | combine({'status': omit}) }}"
+        dr_pvc_definition: "{{ pvc_object | combine({'metadata': pvc_object.metadata | combine({'resourceVersion': omit, 'uid': omit, 'creationTimestamp': omit, 'annotations': omit, 'ownerReferences': omit})}) | combine({'status': omit}) }}"
 
     - name: "Create or Update PVC on DR cluster"
       kubernetes.core.k8s:
