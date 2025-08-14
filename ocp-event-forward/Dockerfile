@@ -4,10 +4,6 @@ FROM registry.access.redhat.com/ubi8/python-39
 # 设置工作目录
 WORKDIR /app
 
-# 创建一个非root用户来运行应用
-RUN useradd -ms /bin/bash appuser
-USER appuser
-
 # 复制依赖文件并安装
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
