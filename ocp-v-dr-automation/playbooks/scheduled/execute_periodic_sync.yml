@@ -105,14 +105,19 @@
         kind: PersistentVolume
       register: dr_all_pvs
 
+    - name: "Filter DR PVs to only include those in target namespaces"
+      ansible.builtin.set_fact:
+        dr_managed_pvs: >-
+          {{ dr_all_pvs.resources | selectattr('spec.claimRef', 'defined') | selectattr('spec.claimRef.namespace', 'in', target_namespaces) | list }}
+
     # Create lists of names from the primary site for easier comparison
     - name: "Create a list of primary PVC names"
       ansible.builtin.set_fact:
         primary_pvc_names: "{{ all_pvcs | map(attribute='metadata.name') | list }}"
 
-    - name: "Create a list of primary PV names"
+    - name: "Create a list of primary PV names from the PVCs"
       ansible.builtin.set_fact:
-        primary_pv_names: "{{ all_pvs.resources | map(attribute='metadata.name') | list }}"
+        primary_pv_names: "{{ all_pvcs | map(attribute='spec.volumeName') | reject('undefined') | list }}"
 
     - name: "Get all VolumeSnapshots from DR site target namespaces"
       kubernetes.core.k8s_info:
@@ -138,13 +143,18 @@
         kind: VolumeSnapshotContent
       register: dr_all_vscs
 
+    - name: "Filter DR VSCs to only include those in target namespaces"
+      ansible.builtin.set_fact:
+        dr_managed_vscs: >-
+          {{ dr_all_vscs.resources | selectattr('spec.volumeSnapshotRef', 'defined') | selectattr('spec.volumeSnapshotRef.namespace', 'in', target_namespaces) | list }}
+
     - name: "Create a list of primary VolumeSnapshot names"
       ansible.builtin.set_fact:
         primary_snapshot_names: "{{ all_snapshots | map(attribute='metadata.name') | list }}"
 
-    - name: "Create a list of primary VolumeSnapshotContent names"
+    - name: "Create a list of primary VolumeSnapshotContent names from Snapshots"
       ansible.builtin.set_fact:
-        primary_vsc_names: "{{ all_vscs.resources | map(attribute='metadata.name') | list }}"
+        primary_vsc_names: "{{ all_snapshots | map(attribute='status.boundVolumeSnapshotContentName') | reject('undefined') | list }}"
 
     # Compare and delete stale resources on DR site
     - name: "Delete stale PVCs from DR site"
@@ -171,7 +181,7 @@
         api_version: v1
         kind: PersistentVolume
         name: "{{ item.metadata.name }}"
-      loop: "{{ dr_all_pvs.resources }}"
+      loop: "{{ dr_managed_pvs }}"
       loop_control:
         label: "PV {{ item.metadata.name }}"
       when: item.metadata.name not in primary_pv_names
@@ -200,7 +210,7 @@
         api_version: snapshot.storage.k8s.io/v1
         kind: VolumeSnapshotContent
         name: "{{ item.metadata.name }}"
-      loop: "{{ dr_all_vscs.resources }}"
+      loop: "{{ dr_managed_vscs }}"
       loop_control:
         label: "VSC {{ item.metadata.name }}"
       when: item.metadata.name not in primary_vsc_names
