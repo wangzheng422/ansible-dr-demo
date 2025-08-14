@@ -1,0 +1,107 @@
+# This is an Ansible Rulebook for local debugging.
+# It should be run with ansible-rulebook.
+---
+- name: Process OCP DR Events from Webhook (Debug)
+  hosts: localhost
+  vars_files:
+    - ../ocp-v-dr-automation/group_vars/all.yml
+  sources:
+    - ansible.eda.webhook:
+        host: 0.0.0.0
+        port: 5000
+
+  rules:
+    # Rule 1: Handle PV creation and modification (non-namespaced)
+    - name: Handle PV Create or Update
+      condition: >
+        event.kind == "PersistentVolume" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_sync.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 2: Handle PV deletion (non-namespaced)
+    - name: Handle PV Deletion
+      condition: >
+        event.kind == "PersistentVolume" and
+        event.type == "DELETED"
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_delete.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 3: Handle PVC creation and modification in watched namespaces
+    - name: Handle PVC Create or Update in Watched Namespaces
+      condition: >
+        event.kind == "PersistentVolumeClaim" and
+        (event.type == "ADDED" or event.type == "MODIFIED") and
+        event.resource.metadata.namespace in target_namespaces
+      action:
+        run_playbook:
+          # NOTE: Using the PV sync playbook. The playbook needs to handle PVC objects.
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_sync.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 4: Handle PVC deletion in watched namespaces
+    - name: Handle PVC Deletion in Watched Namespaces
+      condition: >
+        event.kind == "PersistentVolumeClaim" and
+        event.type == "DELETED" and
+        event.resource.metadata.namespace in target_namespaces
+      action:
+        run_playbook:
+          # NOTE: Using the PV delete playbook. The playbook needs to handle PVC objects.
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_delete.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 5: Handle VolumeSnapshot creation in watched namespaces
+    - name: Handle VolumeSnapshot Creation in Watched Namespaces
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "ADDED" and
+        event.resource.metadata.namespace in target_namespaces and
+        event.resource.status.readyToUse == true
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_snapshot_sync.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 6: Handle VolumeSnapshot deletion in watched namespaces
+    - name: Handle VolumeSnapshot Deletion in Watched Namespaces
+      condition: >
+        event.kind == "VolumeSnapshot" and
+        event.type == "DELETED" and
+        event.resource.metadata.namespace in target_namespaces
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_snapshot_delete.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 7: Handle VolumeSnapshotContent creation and modification (non-namespaced)
+    - name: Handle VolumeSnapshotContent Create or Update
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        (event.type == "ADDED" or event.type == "MODIFIED")
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_snapshot_sync.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
+
+    # Rule 8: Handle VolumeSnapshotContent deletion (non-namespaced)
+    - name: Handle VolumeSnapshotContent Deletion
+      condition: >
+        event.kind == "VolumeSnapshotContent" and
+        event.type == "DELETED"
+      action:
+        run_playbook:
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_snapshot_delete.yml
+          extra_vars:
+            resource_object: "{{ event.resource }}"
