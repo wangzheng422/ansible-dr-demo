@@ -11,10 +11,10 @@ metadata:
   name: eda-k8s-watcher-role
 rules:
 - apiGroups: [""] # "" 代表核心API组
-  resources: ["persistentvolumes"]
+  resources: ["persistentvolumes", "persistentvolumeclaims"]
   verbs: ["get", "list", "watch"]
 - apiGroups: ["snapshot.storage.k8s.io"]
-  resources: ["volumesnapshots"]
+  resources: ["volumesnapshots", "volumesnapshotcontents"]
   verbs: ["get", "list", "watch"]
 
 ---

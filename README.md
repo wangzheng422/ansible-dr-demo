@@ -88,13 +88,15 @@ playbooks/scheduled/execute_periodic_sync.yml \
 
 cd ~/git/ansible-dr-demo/ocp-event-forward
 
-podman build -t quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v03 -f Dockerfile
+podman build -t quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v04 -f Dockerfile
 
-podman push quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v03
+podman push quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v04
 
 ```
 
 ## run eda on ocp for testing
+
+on primary site
 
 ```bash
 
@@ -108,15 +110,26 @@ cat rbac.yaml | oc apply -f -
 oc delete deploy/eda-k8s-event-forwarder -n eda
 
 cat deployment.yaml | \
-sed "s#quay.io/your-repo/eda-k8s-event-forwarder:latest#quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v03#g" | \
+sed "s#quay.io/your-repo/eda-k8s-event-forwarder:latest#quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v04#g" | \
 sed "s#http://your-eda-webhook-url:port#http://192.168.99.1:5000#g" | \
 oc apply -f -
 
+```
 
+on dr site
 
+```bash
 
+cd ~/git/ansible-dr-demo/
+
+ansible-rulebook \
+--rulebook rulebooks/ocp_dr_events_debug.yml \
+--vars-file ocp-v-dr-automation/group_vars/all.yml \
+-vvv
 
 ```
+
+
 
 ## config app
 

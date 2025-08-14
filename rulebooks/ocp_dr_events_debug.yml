@@ -3,8 +3,6 @@
 ---
 - name: Process OCP DR Events from Webhook (Debug)
   hosts: localhost
-  vars_files:
-    - ../ocp-v-dr-automation/group_vars/all.yml
   sources:
     - ansible.eda.webhook:
         host: 0.0.0.0
