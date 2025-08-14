@@ -78,6 +78,16 @@ playbooks/scheduled/execute_periodic_sync.yml \
 
 ```
 
+## build image for eda
+
+```bash
+
+cd ~/git/ansible-dr-demo/ocp-event-forward
+
+podman build -t quay.io/wangzheng422/qimgs:ocp-dr-eda-2025.08.14-v01 -f Dockerfile
+
+```
+
 ## config app
 
 <img src="imgs/README.md/2025-08-12-11-40-26.png" width="1024">
