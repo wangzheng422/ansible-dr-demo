@@ -36,7 +36,7 @@
       condition: >
         event.kind == "PersistentVolumeClaim" and
         (event.type == "ADDED" or event.type == "MODIFIED") and
-        event.resource.metadata.namespace in target_namespaces
+        event.resource.metadata.namespace in vars.target_namespaces
       action:
         run_playbook:
           # NOTE: Using the PV sync playbook. The playbook needs to handle PVC objects.
@@ -49,7 +49,7 @@
       condition: >
         event.kind == "PersistentVolumeClaim" and
         event.type == "DELETED" and
-        event.resource.metadata.namespace in target_namespaces
+        event.resource.metadata.namespace in vars.target_namespaces
       action:
         run_playbook:
           # NOTE: Using the PV delete playbook. The playbook needs to handle PVC objects.
@@ -62,7 +62,7 @@
       condition: >
         event.kind == "VolumeSnapshot" and
         event.type == "ADDED" and
-        event.resource.metadata.namespace in target_namespaces and
+        event.resource.metadata.namespace in vars.target_namespaces and
         event.resource.status.readyToUse == true
       action:
         run_playbook:
@@ -75,7 +75,7 @@
       condition: >
         event.kind == "VolumeSnapshot" and
         event.type == "DELETED" and
-        event.resource.metadata.namespace in target_namespaces
+        event.resource.metadata.namespace in vars.target_namespaces
       action:
         run_playbook:
           name: ../ocp-v-dr-automation/playbooks/event_driven/handle_snapshot_delete.yml

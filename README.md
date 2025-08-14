@@ -124,7 +124,7 @@ cd ~/git/ansible-dr-demo/
 
 ansible-rulebook \
 --rulebook rulebooks/ocp_dr_events_debug.yml \
---vars-file ocp-v-dr-automation/group_vars/all.yml \
+-e ocp-v-dr-automation/group_vars/all.yml \
 -vvv
 
 ```
