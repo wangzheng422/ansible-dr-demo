@@ -20,3 +20,11 @@
         *   Created new role structure for periodic sync actions: `periodic_pv_pvc_sync`, `periodic_snapshot_sync`.
         *   Implemented a dispatch logic within the `main.yml` of PV/PVC-related roles to dynamically include tasks based on the `storageClassName` of the resource.
         *   Created placeholder task files for `nfs-subdir` and `nfs-dynamic` storage classes.
+
+*   **Files Modified**: 
+    *   `ocp-v-dr-automation/roles/periodic_storage_sync/tasks/main.yml`
+    *   `ocp-v-dr-automation/roles/periodic_pv_pvc_sync/tasks/sync_nfs_dynamic.yml`
+*   **Change Summary**:
+    *   Migrated the `nfs-dynamic` storage class synchronization logic from the `periodic_storage_sync` role to the `periodic_pv_pvc_sync` role.
+    *   The `periodic_storage_sync` role is now only responsible for `VolumeSnapshot` metadata synchronization.
+    *   The `sync_nfs_dynamic.yml` task file now contains the complete logic for synchronizing `nfs-dynamic` PVs and PVCs.
