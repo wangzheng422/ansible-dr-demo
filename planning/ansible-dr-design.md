@@ -178,35 +178,55 @@ graph TD
     class H,I verification;
 ```
 
-### **3\. Ansible 项目结构设计 (集成 EDA)**
+### **3\. Ansible 项目结构设计 (架构更新)**
+
+为了支持多种 `StorageClass` 并将 PV/PVC 与 VolumeSnapshot 的处理逻辑解耦，项目结构更新如下：
+
 ```
 ocp-v-dr-automation/
 ├── inventory/
-│   └── hosts.ini                 # 主机清单
+│   └── hosts.ini
 ├── group_vars/
-│   ├── all.yml
-│   └── ...
+│   └── all.yml
 ├── rulebooks/
-│   └── ocp_dr_events.yml         # EDA 规则手册，监听PV和Snapshot事件
+│   └── ocp_dr_events.yml         # EDA 规则手册，统一监听事件
 ├── roles/
-│   ├── nfs_sync_on_event/        # 角色: 响应PV创建/修改事件，执行rsync
-│   ├── nfs_delete_on_event/      # 角色: 响应PV删除事件，删除远程目录
-│   ├── snapshot_sync_on_event/   # 角色: 响应Snapshot创建事件，同步元数据
-│   ├── snapshot_delete_on_event/ # 角色: 响应Snapshot删除事件，清理元数据
+│   ├── event_pv_pvc_sync/        # 角色: (事件驱动) 处理 PV/PVC 创建/更新
+│   │   └── tasks/
+│   │       ├── main.yml          # -> 根据 storageClassName 分发
+│   │       ├── handle_nfs_subdir.yml
+│   │       └── handle_nfs_dynamic.yml
+│   ├── event_pv_pvc_delete/      # 角色: (事件驱动) 处理 PV/PVC 删除
+│   │   └── tasks/
+│   │       ├── main.yml          # -> 根据 storageClassName 分发
+│   │       ├── handle_nfs_subdir.yml
+│   │       └── handle_nfs_dynamic.yml
+│   ├── event_snapshot_sync/      # 角色: (事件驱动) 处理快照创建/更新
+│   ├── event_snapshot_delete/    # 角色: (事件驱动) 处理快照删除
+│   │
+│   ├── periodic_pv_pvc_sync/     # 角色: (周期同步) 同步 PV/PVC
+│   │   └── tasks/
+│   │       ├── main.yml          # -> 遍历并根据 storageClassName 分发
+│   │       ├── sync_nfs_subdir.yml
+│   │       └── sync_nfs_dynamic.yml
+│   ├── periodic_snapshot_sync/   # 角色: (周期同步) 同步快照
+│   │
 │   ├── oadp_backup_parser/       # 角色: (DR用) 解析OADP备份
-│   ├── dr_storage_provisioner/   # 角色: (DR用) 在DR集群部署PV/PVC
-│   ├── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
-│   └── periodic_storage_sync/    # 角色: (周期性任务用) 遍历并同步所有存储资源
+│   ├── dr_storage_provisioner/   # 角色: (DR用) 在DR集群部署PV/PVC (按需)
+│   └── oadp_restore_trigger/     # 角色: (DR用) 执行OADP恢复
+│
 └── playbooks/
     ├── event_driven/
-    │   ├── handle_nfs_pv_sync.yml    # Playbook: (EDA用) 调用nfs_sync_on_event
-    │   ├── handle_nfs_pv_delete.yml  # Playbook: (EDA用) 调用nfs_delete_on_event
-    │   ├── handle_snapshot_sync.yml  # Playbook: (EDA用) 调用snapshot_sync_on_event
-    │   └── handle_snapshot_delete.yml# Playbook: (EDA用) 调用snapshot_delete_on_event
+    │   ├── handle_pv_pvc_sync.yml    # Playbook: (EDA) 调用 event_pv_pvc_sync
+    │   ├── handle_pv_pvc_delete.yml  # Playbook: (EDA) 调用 event_pv_pvc_delete
+    │   ├── handle_snapshot_sync.yml  # Playbook: (EDA) 调用 event_snapshot_sync
+    │   └── handle_snapshot_delete.yml# Playbook: (EDA) 调用 event_snapshot_delete
+    │
     ├── manual_dr/
     │   └── execute_failover.yml      # Playbook: (DR用) 执行完整的灾备切换
+    │
     └── scheduled/
-        └── execute_periodic_sync.yml # Playbook: (周期性任务用) 执行完整的周期性同步
+        └── execute_periodic_sync.yml # Playbook: (周期性) 依次调用 periodic_pv_pvc_sync 和 periodic_snapshot_sync
 ```
 ### **4. 模式一：事件驱动数据复制逻辑详解**
 
@@ -239,66 +259,71 @@ ocp-v-dr-automation/
     - **命名空间资源 (PVC, VS)**: 在处理事件前，会检查资源的命名空间是否在 `watched_namespaces` 列表中。
   - **触发动作**: 每个规则匹配成功后，会调用 `run_job_template` 动作，将事件中的资源对象 (`event.resource`) 作为 `extra_vars` 传递给相应的 AAP 作业模板（例如 "EDA - Sync PV to DR" 或 "EDA - Delete PVC from DR"），从而启动后续的同步或清理流程。
   - **快照特殊处理**: 对于 `VolumeSnapshot` 的创建事件，规则会额外检查 `status.readyToUse == true` 条件，确保只在快照可用时才触发同步。
-* **对应的 Playbooks**:
-  * Playbook 现在应该更加通用，以处理不同类型的资源对象。例如，可以有一个通用的 `handle_resource_sync.yml` 和 `handle_resource_delete.yml`，它们接收 `resource_object` 变量，并根据 `resource_object.kind` 来调用不同的角色或执行不同的逻辑。
-  * **playbooks/event_driven/handle_resource_sync.yml**:
-    1. 接收 AAP EDA 传递过来的 `resource_object` 变量。
-    2. 根据 `resource_object.kind` (e.g., "PersistentVolume", "PersistentVolumeClaim") 调用相应的同步角色。
-    3. 角色逻辑：解析传入的 `resource_object`，执行数据和元数据同步。
-  * **playbooks/event_driven/handle_resource_delete.yml**:
-    1. 接收 `resource_object` 变量。
-    2. 根据 `resource_object.kind` 调用相应的删除角色。
-    3. 角色逻辑：解析传入的 `resource_object`，在灾备端执行清理操作。
+* **对应的 Playbooks 和 Roles**:
+  * **逻辑分离**: Playbook 层现在严格分离 PV/PVC 事件和 VolumeSnapshot 事件，调用不同的专用 Playbook。
+  * **playbooks/event_driven/handle_pv_pvc_sync.yml**:
+    1.  接收 AAP EDA 传递过来的 `resource_object` (PV 或 PVC)。
+    2.  调用 `event_pv_pvc_sync` 角色进行处理。
+    3.  **角色逻辑 (`event_pv_pvc_sync`)**:
+        *   **核心**: 角色内部的 `main.yml` 会检查 `resource_object.spec.storageClassName`。
+        *   使用 `include_tasks` 或类似机制，根据 `storageClassName` (例如 `nfs-subdir`, `nfs-dynamic`) 调用对应的处理文件 (例如 `handle_nfs_subdir.yml`)。
+        *   特定处理文件负责执行该存储类型的数据同步 (如 `rsync`) 和元数据处理。
+  * **playbooks/event_driven/handle_pv_pvc_delete.yml**:
+    1.  接收 `resource_object`。
+    2.  调用 `event_pv_pvc_delete` 角色。
+    3.  **角色逻辑 (`event_pv_pvc_delete`)**: 同样根据 `storageClassName` 进行分发，执行特定于存储的清理操作。
+  * **playbooks/event_driven/handle_snapshot_sync.yml**:
+    1.  接收 `resource_object` (VolumeSnapshot 或 VolumeSnapshotContent)。
+    2.  调用 `event_snapshot_sync` 角色，该角色负责同步快照元数据。
+  * **playbooks/event_driven/handle_snapshot_delete.yml**:
+    1.  接收 `resource_object`。
+    2.  调用 `event_snapshot_delete` 角色，负责清理快照元数据。
 
 ### **5\. 模式二：周期性主动同步逻辑详解**
 
-此流程通过 AAP 的调度功能（Scheduler）定时触发，例如每小时执行一次，作为对事件驱动模式的补充和校验。
+此流程通过 AAP 的调度功能（Scheduler）定时触发，作为对事件驱动模式的补充和校验。**架构更新后，PV/PVC 的同步逻辑与 VolumeSnapshot 的同步逻辑被分离到不同的角色中，以实现更好的模块化和扩展性。**
 
 *   **Playbook**: `playbooks/scheduled/execute_periodic_sync.yml`
-*   **核心角色**: `roles/periodic_storage_sync`
+*   **核心角色**: `roles/periodic_pv_pvc_sync`, `roles/periodic_snapshot_sync`
 *   **关键变量**: Playbook 应通过变量 `target_namespaces` (例如 `['ns1', 'ns2']`) 来指定要同步的命名空间。
 
 #### 5.1 获取所有相关资源
-*   连接到主 OpenShift 集群 (`ocp_primary`)。
-*   使用 `k8s_info` 模块，遍历 `target_namespaces` 列表，获取每个命名空间下的 `PersistentVolumeClaim` 和 `VolumeSnapshot` 列表。
-*   使用 `k8s_info` 模块获取所有相关的 `PersistentVolume` 和 `VolumeSnapshotContent` 列表（这些是非命名空间资源，但可以通过关联的 PVC 和 VolumeSnapshot 进行筛选）。
+*   此步骤保持不变。Playbook 首先连接到主 OpenShift 集群 (`ocp_primary`)。
+*   使用 `k8s_info` 模块，获取 `target_namespaces` 中所有的 `PersistentVolumeClaim` 和 `VolumeSnapshot` 列表。
+*   同时获取所有相关的 `PersistentVolume` 和 `VolumeSnapshotContent` 列表。
 
-#### 5.2 遍历并同步 PVC/PV (Warm Standby)
-*   在 Playbook 中，使用 `loop` 循环遍历获取到的 PVC 列表。
-*   对于每一个 PVC，找到其绑定的 PV (`spec.volumeName`)。
-*   调用 `periodic_storage_sync` 角色，传入 PVC 和 PV 对象。
-*   **角色逻辑 (`periodic_storage_sync`)**:
-    *   **输入**: `pvc_object` 和 `pv_object`。
-    *   **第一步：数据同步**: `delegate_to` 到主 NFS 服务器，执行 `rsync` 将数据同步到灾备 NFS 服务器。**注意**: 此操作要求主 NFS 服务器 (`primary_nfs_server`) 与灾备 NFS 服务器 (`dr_nfs_server`) 之间已配置好基于密钥的 SSH 免密登录。
-    *   **第二步：修改 PV 定义**: 在内存中修改 `pv_object` 的定义，将其 `spec.nfs.server` 指向灾备 NFS 服务器 (`dr_nfs_server`)。同时，将 `spec.persistentVolumeReclaimPolicy` 强制设置为 `Retain`，以防止在灾备端因找不到删除插件而导致 PV 状态失败。
-    *   **第三步：清理并应用 PV/PVC**:
-        *   **清理元数据**: 在应用到灾备集群前，必须清理 PV 和 PVC 对象中特定于源集群的元数据。这包括 `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations`, `status` 字段，以及 PV 中的 `spec.claimRef`。移除 `claimRef` 是为了让灾备端的 PV 能够被新的 PVC 绑定。
-        *   **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块，通过 `ocp_dr_api_server` 和 `ocp_dr_api_key` 变量连接到灾备 OpenShift 集群 (`ocp_dr`)，然后将清理并修改后的 PV 定义以及清理后的 PVC 定义 `apply` 到该集群。
-    *   **记录日志**: 记录每个 PV 和 PVC 在灾备集群上的部署状态。
-    *   **注意**: 这种 "Warm Standby" 模式意味着存储资源在灾备端是预先创建好的，从而缩短了恢复时间。
+#### 5.2 周期性同步 PVC/PV (Warm Standby)
+*   **Playbook 逻辑**: 主 Playbook (`execute_periodic_sync.yml`) 调用 `periodic_pv_pvc_sync` 角色，并将获取到的 PV 和 PVC 列表作为参数传递。
+*   **角色逻辑 (`periodic_pv_pvc_sync`)**:
+    *   **输入**: `all_pvs` 和 `all_pvcs` 列表。
+    *   **遍历**: 角色内部 `loop` 循环遍历所有需要同步的 PVC。
+    *   **核心：存储逻辑分发**:
+        *   对于每个 PVC，角色会检查其关联 PV 的 `spec.storageClassName`。
+        *   根据 `storageClassName`，使用 `include_tasks` 调用特定于该存储类型的同步逻辑文件（例如 `sync_nfs_subdir.yml`, `sync_nfs_dynamic.yml`）。
+    *   **特定存储逻辑 (以 `sync_nfs_*.yml` 为例)**:
+        1.  **数据同步**: `delegate_to` 到主存储服务器，执行 `rsync` 将数据同步到灾备存储服务器。
+        2.  **修改 PV 定义**: 在内存中修改 PV 定义，使其指向灾备存储服务器的路径和地址。同时，将 `persistentVolumeReclaimPolicy` 强制设置为 `Retain`。
+        3.  **清理元数据**: 在应用到灾备集群前，清理 PV 和 PVC 对象中特定于源集群的元数据（如 `resourceVersion`, `uid`, `claimRef` 等）。
+        4.  **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块将清理和修改后的 PV 和 PVC 定义 `apply` 到灾备集群。
+    *   **记录日志**: 记录每个 PV 和 PVC 的同步状态。
 
-#### 5.3 遍历并同步 VolumeSnapshot/VolumeSnapshotContent
-*   此功能现已实现，用于将快照的元数据同步到灾备站点。
-*   Playbook 使用 `loop` 循环遍历获取到的 `VolumeSnapshot` 列表。
-*   对于每一个 `VolumeSnapshot` (且 `status.readyToUse == true`)，找到其绑定的 `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`)。
-*   调用 `periodic_storage_sync` 角色，并传入 `snapshot_object` 和 `content_object` 变量。
-*   **角色逻辑**:
-    *   **输入**: `snapshot_object` 和 `content_object`。
-    *   **核心功能：元数据同步**: 此角色的主要任务是同步 Kubernetes 资源对象，确保灾备集群了解这些快照的存在。
-    *   **清理元数据**: 在应用到灾备集群前，角色会清理 `VolumeSnapshot` 和 `VolumeSnapshotContent` 对象中特定于源集群的元数据。这包括 `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations` 和 `status` 字段。
-    *   **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块，将清理后的 `VolumeSnapshot` 和 `VolumeSnapshotContent` 定义 `apply` 到灾备 OpenShift 集群。
-    *   **数据同步说明**: 当前实现专注于元数据的同步。快照的底层数据（例如，NFS 上的 `.snapshot` 目录中的实际数据）被假定由存储层的其他机制（如存储阵列复制或带 `rsync` 的自定义逻辑）进行同步。Ansible 角色本身不执行快照数据的 `rsync`。
+#### 5.3 周期性同步 VolumeSnapshot/VolumeSnapshotContent
+*   **Playbook 逻辑**: 在 PV/PVC 同步完成后，主 Playbook 调用 `periodic_snapshot_sync` 角色，并将获取到的 VolumeSnapshot 和 VolumeSnapshotContent 列表作为参数传递。
+*   **角色逻辑 (`periodic_snapshot_sync`)**:
+    *   **输入**: `all_snapshots` 和 `all_snapshot_contents` 列表。
+    *   **遍历**: 角色 `loop` 循环遍历所有 `readyToUse` 的 VolumeSnapshot。
+    *   **元数据同步**:
+        1.  **清理元数据**: 清理 VolumeSnapshot 和 VolumeSnapshotContent 对象中特定于源集群的元数据。
+        2.  **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块将清理后的定义 `apply` 到灾备集群。
+    *   **数据同步说明**: 此角色专注于元数据同步。快照的底层数据假定由存储层复制机制或带 `rsync` 的自定义逻辑处理。
 
 #### 5.4 清理灾备站点多余资源
-*   在同步完主站点的所有资源后，Playbook 会执行反向检查。
-*   它会获取灾备站点指定命名空间内的所有相关资源（PV, PVC, VolumeSnapshot, VolumeSnapshotContent 等）。
-*   将灾备站点的资源列表与主站点的资源列表进行比较。
-*   如果发现某个资源存在于灾备站点但不存在于主站点，则认为该资源是多余的（已在主站删除），并会在灾备站点上将其删除。
-*   所有删除操作都会被记录。
+*   此逻辑在主 Playbook 的最后执行，保持不变。
+*   它会分别获取灾备站点的 PV/PVC 和 VolumeSnapshot/VSC 列表。
+*   与主站点的资源列表进行比较，并删除在灾备站点上多余的资源。
 
 #### 5.5 生成报告
-*   在 Playbook 的最后，汇总所有资源的同步和清理结果。
-*   生成一个简明的报告，指出哪些资源同步成功，哪些失败，哪些被清理。此报告可以通过邮件、Webhook 等方式通知管理员。
+*   此步骤保持不变，在 Playbook 的最后汇总所有操作结果并生成报告。
 
 ### **6. 模式三：手动灾备恢复逻辑详解**
 
@@ -327,14 +352,17 @@ ocp-v-dr-automation/
     4.  解压并解析，提取所有 PV, PVC, VolumeSnapshot, 和 VolumeSnapshotContent 的 JSON 定义，形成 `pv_info_list`, `pvc_info_list`, `vs_info_list`, `vsc_info_list` 变量。
     5.  **输出**: 包含所有已解析资源定义的列表变量。
 
-#### 6.3 存储逻辑分发与验证 (NFS 场景)
+#### 6.3 存储逻辑分发与验证
 
 *   **Playbook 内部逻辑**:
-    1.  **输入**: 上一步输出的 `pv_info_list`。
-    2.  **逻辑分发**: 使用 `when` 条件或 `include_role` 的 `when` 子句，根据 `item.spec.storageClassName` 来决定执行哪个存储类型的验证逻辑。
-    3.  **NFS 验证**: **在灾备站点的 NFS 服务器上 (`delegate_to: dr_nfs_server`)** 执行数据验证。此步骤不再执行数据同步，而是简化为检查灾备端的数据目录是否存在。
-        *   根据 `pv_info_list` 中每个 PV 的路径信息，在灾备 NFS 服务器上检查对应的目录是否已创建。
-        *   如果目录不存在，则记录警告或错误，表明周期性同步可能存在问题。
+    1.  **输入**: `oadp_backup_parser` 角色输出的 `pv_info_list`。
+    2.  **核心：存储逻辑分发**: Playbook 会遍历 `pv_info_list`。对于列表中的每一个 PV 对象，它会检查 `item.spec.storageClassName`。
+    3.  **动态调用验证任务**: 根据 `storageClassName`，Playbook 会动态地 `include_tasks` 一个特定于该存储类型的验证任务文件。例如，如果 `storageClassName` 是 `nfs-dynamic`，它会调用 `verify_nfs_dynamic.yml`。
+    4.  **特定存储验证 (以 NFS 为例)**:
+        *   **目标**: 验证灾备端的数据是否就绪。
+        *   **操作**: `delegate_to` 到灾备 NFS 服务器 (`dr_nfs_server`)。
+        *   根据 PV 定义中的路径信息，检查灾备 NFS 服务器上对应的目录是否存在且非空。
+        *   此步骤是验证，而不是同步。如果验证失败，则会记录严重警告或中止流程，表明周期性同步存在问题，灾备数据不可靠。
 
 #### 6.4 在 DR OCP 上恢复应用
 
