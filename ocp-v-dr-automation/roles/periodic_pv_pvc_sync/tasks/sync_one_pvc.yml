@@ -1,0 +1,28 @@
+---
+- name: "Process one PVC"
+  vars:
+    pvc_object: "{{ item }}"
+    # Find the PV that is bound to this PVC
+    pv_object: "{{ all_pvs_to_sync | selectattr('metadata.name', 'equalto', item.spec.volumeName) | first }}"
+    storage_class_name: "{{ pv_object.spec.storageClassName | default('') }}"
+  block:
+    - name: "Debug: Determined storage class name for periodic sync"
+      debug:
+        msg: "Processing PVC {{ pvc_object.metadata.name }}, PV {{ pv_object.metadata.name }}, StorageClass is '{{ storage_class_name }}'"
+
+    - name: "Include tasks for nfs-subdir StorageClass"
+      include_tasks: sync_nfs_subdir.yml
+      when: storage_class_name == 'nfs-subdir'
+
+    - name: "Include tasks for nfs-dynamic StorageClass"
+      include_tasks: sync_nfs_dynamic.yml
+      when: storage_class_name == 'nfs-dynamic'
+
+    - name: "Include tasks for nfs-csi StorageClass"
+      include_tasks: sync_nfs_csi.yml
+      when: storage_class_name == 'nfs-csi'
+
+    - name: "Fail if StorageClass is not supported"
+      fail:
+        msg: "Unsupported StorageClass '{{ storage_class_name }}' for periodic synchronization."
+      when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic', 'nfs-csi']
