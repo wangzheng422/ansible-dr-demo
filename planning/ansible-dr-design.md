@@ -298,10 +298,10 @@ ocp-v-dr-automation/
 #### 5.2 周期性同步 PVC/PV (Warm Standby)
 *   **Playbook 逻辑**: 主 Playbook (`execute_periodic_sync.yml`) 调用 `periodic_pv_pvc_sync` 角色，并将获取到的 PV 和 PVC 列表作为参数传递。
 *   **角色逻辑 (`periodic_pv_pvc_sync`)**:
-    *   **输入**: `all_pvs` 和 `all_pvcs` 列表。
-    *   **遍历**: 角色内部 `loop` 循环遍历所有需要同步的 PVC。
-    *   **核心：存储逻辑分发**:
-        *   对于每个 PVC，角色会检查其关联 PV 的 `spec.storageClassName`。
+    *   **输入**: `all_pvs_to_sync` 和 `all_pvcs_to_sync` 列表。
+    *   **模块化处理**: 角色 `main.yml` 循环遍历所有 PVC，并通过 `include_tasks: sync_one_pvc.yml` 将每个 PVC 的处理委托给一个独立的任务文件。
+    *   **核心逻辑 (`sync_one_pvc.yml`)**:
+        *   对于单个 PVC，此文件会查找其绑定的 PV，并确定 `storageClassName`。
         *   根据 `storageClassName`，使用 `include_tasks` 调用特定于该存储类型的同步逻辑文件（例如 `sync_nfs_subdir.yml`, `sync_nfs_dynamic.yml`, `sync_nfs_csi.yml`）。
     *   **特定存储逻辑 (以 `sync_nfs_*.yml` 为例)**:
         1.  **数据同步**: `delegate_to` 到主存储服务器，执行 `rsync` 将数据同步到灾备存储服务器。
@@ -313,11 +313,12 @@ ocp-v-dr-automation/
 #### 5.3 周期性同步 VolumeSnapshot/VolumeSnapshotContent
 *   **Playbook 逻辑**: 在 PV/PVC 同步完成后，主 Playbook 调用 `periodic_snapshot_sync` 角色，并将获取到的 VolumeSnapshot 和 VolumeSnapshotContent 列表作为参数传递。
 *   **角色逻辑 (`periodic_snapshot_sync`)**:
-    *   **输入**: `all_snapshots` 和 `all_snapshot_contents` 列表。
-    *   **遍历**: 角色 `loop` 循环遍历所有 `readyToUse` 的 VolumeSnapshot。
-    *   **元数据同步**:
-        1.  **清理元数据**: 清理 VolumeSnapshot 和 VolumeSnapshotContent 对象中特定于源集群的元数据。
-        2.  **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块将清理后的定义 `apply` 到灾备集群。
+    *   **输入**: `all_snapshots_to_sync` 和 `all_vscs_to_sync` 列表。
+    *   **模块化处理**: 角色 `main.yml` 循环遍历所有 `readyToUse` 的 VolumeSnapshot，并通过 `include_tasks: sync_one_snapshot.yml` 将每个快照的处理委托给一个独立的任务文件。
+    *   **核心逻辑 (`sync_one_snapshot.yml`)**:
+        1.  **查找 VSC**: 找到与 VolumeSnapshot 绑定的 VolumeSnapshotContent。
+        2.  **清理元数据**: 分别清理 VolumeSnapshot 和 VolumeSnapshotContent 对象中特定于源集群的元数据（如 `resourceVersion`, `uid`, `status` 等）。
+        3.  **应用到灾备集群**: 使用 `kubernetes.core.k8s` 模块将清理后的定义 `apply` 到灾备集群。
     *   **数据同步说明**: 此角色专注于元数据同步。快照的底层数据假定由存储层复制机制或带 `rsync` 的自定义逻辑处理。
 
 #### 5.4 清理灾备站点多余资源
