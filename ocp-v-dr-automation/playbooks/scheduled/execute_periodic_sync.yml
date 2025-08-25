@@ -52,29 +52,19 @@
         kind: VolumeSnapshotContent
       register: all_vscs
 
-    - name: "Loop through each PVC and sync its PV"
+    - name: "Sync all PVs and PVCs to DR site"
       ansible.builtin.include_role:
-        name: periodic_storage_sync
+        name: periodic_pv_pvc_sync
       vars:
-        pvc_object: "{{ item }}"
-        # Find the PV that is bound to this PVC
-        pv_object: "{{ all_pvs.resources | selectattr('metadata.name', 'equalto', item.spec.volumeName) | first }}"
-      loop: "{{ all_pvcs }}"
-      loop_control:
-        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
-      when: item.spec.volumeName is defined
+        all_pvcs_to_sync: "{{ all_pvcs }}"
+        all_pvs_to_sync: "{{ all_pvs.resources }}"
 
-    - name: "Loop through each VolumeSnapshot and sync its Content"
+    - name: "Sync all VolumeSnapshots and Contents to DR site"
       ansible.builtin.include_role:
-        name: periodic_storage_sync
+        name: periodic_snapshot_sync
       vars:
-        snapshot_object: "{{ item }}"
-        # Find the VSC that is bound to this VolumeSnapshot
-        content_object: "{{ all_vscs.resources | selectattr('metadata.name', 'equalto', item.status.boundVolumeSnapshotContentName) | first }}"
-      loop: "{{ all_snapshots }}"
-      loop_control:
-        label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
-      when: item.status is defined and item.status.boundVolumeSnapshotContentName is defined and item.status.readyToUse | default(false)
+        all_snapshots_to_sync: "{{ all_snapshots }}"
+        all_vscs_to_sync: "{{ all_vscs.resources }}"
 
     - name: "-------------------- Cleanup DR Site --------------------"
       ansible.builtin.debug:

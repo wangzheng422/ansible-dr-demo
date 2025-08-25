@@ -1,0 +1,31 @@
+---
+# tasks file for event_snapshot_sync
+- name: "Debug: Syncing VolumeSnapshot Metadata"
+  debug:
+    msg: "Processing {{ resource_object.kind }} named {{ resource_object.metadata.name }}"
+
+- name: "Clean resource object metadata for DR site"
+  set_fact:
+    dr_resource_object: "{{ resource_object | combine({'metadata': resource_object.metadata | combine(dr_metadata_overrides)}, recursive=True) }}"
+  vars:
+    dr_metadata_overrides:
+      resourceVersion: null
+      uid: null
+      creationTimestamp: null
+      annotations: "{{ resource_object.metadata.annotations | omit('kubectl.kubernetes.io/last-applied-configuration') }}"
+
+- name: "Clean resource object status for DR site"
+  set_fact:
+    dr_resource_object: "{{ dr_resource_object | combine({'status': null}, recursive=True) }}"
+  when: dr_resource_object.status is defined
+
+- name: "Apply the cleaned resource to the DR cluster"
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ dr_resource_object }}"
+    kubeconfig: "{{ dr_kubeconfig_path }}"
+  delegate_to: localhost
+
+- name: "Log VolumeSnapshot Sync Completion"
+  debug:
+    msg: "Successfully synchronized {{ dr_resource_object.kind }} {{ dr_resource_object.metadata.name }} to DR cluster."

@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-dynamic delete logic"
+  debug:
+    msg: "Delete logic for nfs-dynamic StorageClass would be executed here."

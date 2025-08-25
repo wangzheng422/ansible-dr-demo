@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for periodic nfs-subdir sync logic"
+  debug:
+    msg: "Periodic sync logic for nfs-subdir StorageClass would be executed here for PV {{ pv_object.metadata.name }}."

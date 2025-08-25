@@ -1,0 +1,60 @@
+---
+# tasks file for periodic_snapshot_sync
+- name: "Loop through each VolumeSnapshot and sync its Content"
+  vars:
+    snapshot_object: "{{ item }}"
+    # Find the VSC that is bound to this VolumeSnapshot
+    content_object: "{{ all_vscs_to_sync | selectattr('metadata.name', 'equalto', item.status.boundVolumeSnapshotContentName) | first }}"
+  block:
+    - name: "Debug: Syncing VolumeSnapshot Metadata"
+      debug:
+        msg: "Processing {{ snapshot_object.kind }} named {{ snapshot_object.metadata.name }}"
+
+    - name: "Clean Snapshot resource metadata for DR site"
+      set_fact:
+        dr_snapshot_object: "{{ snapshot_object | combine({'metadata': snapshot_object.metadata | combine(dr_metadata_overrides)}, recursive=True) }}"
+      vars:
+        dr_metadata_overrides:
+          resourceVersion: null
+          uid: null
+          creationTimestamp: null
+          annotations: "{{ snapshot_object.metadata.annotations | omit('kubectl.kubernetes.io/last-applied-configuration') }}"
+
+    - name: "Clean Snapshot resource status for DR site"
+      set_fact:
+        dr_snapshot_object: "{{ dr_snapshot_object | combine({'status': null}, recursive=True) }}"
+      when: dr_snapshot_object.status is defined
+
+    - name: "Apply the cleaned Snapshot to the DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ dr_snapshot_object }}"
+        kubeconfig: "{{ dr_kubeconfig_path }}"
+      delegate_to: localhost
+
+    - name: "Clean VSC resource metadata for DR site"
+      set_fact:
+        dr_content_object: "{{ content_object | combine({'metadata': content_object.metadata | combine(dr_metadata_overrides)}, recursive=True) }}"
+      vars:
+        dr_metadata_overrides:
+          resourceVersion: null
+          uid: null
+          creationTimestamp: null
+          annotations: "{{ content_object.metadata.annotations | omit('kubectl.kubernetes.io/last-applied-configuration') }}"
+
+    - name: "Clean VSC resource status for DR site"
+      set_fact:
+        dr_content_object: "{{ dr_content_object | combine({'status': null}, recursive=True) }}"
+      when: dr_content_object.status is defined
+
+    - name: "Apply the cleaned VSC to the DR cluster"
+      kubernetes.core.k8s:
+        state: present
+        definition: "{{ dr_content_object }}"
+        kubeconfig: "{{ dr_kubeconfig_path }}"
+      delegate_to: localhost
+
+  loop: "{{ all_snapshots_to_sync }}"
+  loop_control:
+    label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"
+  when: item.status is defined and item.status.boundVolumeSnapshotContentName is defined and item.status.readyToUse | default(false)

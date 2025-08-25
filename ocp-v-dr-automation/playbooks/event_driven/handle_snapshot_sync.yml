@@ -2,5 +2,11 @@
 - name: Handle VolumeSnapshot Sync Event
   hosts: localhost
   gather_facts: false
-  roles:
-    - role: snapshot_sync_on_event
+  # The event resource object is passed from the EDA rulebook as 'resource_object'
+  vars:
+    resource_object: {}
+  tasks:
+    - name: Include role to handle VolumeSnapshot synchronization
+      include_role:
+        name: event_snapshot_sync
+      when: resource_object is defined and resource_object

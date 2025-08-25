@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-subdir delete logic"
+  debug:
+    msg: "Delete logic for nfs-subdir StorageClass would be executed here."

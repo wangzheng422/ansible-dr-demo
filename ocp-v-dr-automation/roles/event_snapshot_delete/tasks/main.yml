@@ -1,0 +1,19 @@
+---
+# tasks file for event_snapshot_delete
+- name: "Debug: Deleting VolumeSnapshot Metadata"
+  debug:
+    msg: "Processing deletion for {{ resource_object.kind }} named {{ resource_object.metadata.name }}"
+
+- name: "Delete the resource from the DR cluster"
+  kubernetes.core.k8s:
+    state: absent
+    api_version: "{{ resource_object.apiVersion }}"
+    kind: "{{ resource_object.kind }}"
+    name: "{{ resource_object.metadata.name }}"
+    namespace: "{{ resource_object.metadata.namespace | default(omit) }}"
+    kubeconfig: "{{ dr_kubeconfig_path }}"
+  delegate_to: localhost
+
+- name: "Log VolumeSnapshot Delete Completion"
+  debug:
+    msg: "Successfully deleted {{ resource_object.kind }} {{ resource_object.metadata.name }} from DR cluster."

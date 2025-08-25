@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-subdir sync logic"
+  debug:
+    msg: "Sync logic for nfs-subdir StorageClass would be executed here."

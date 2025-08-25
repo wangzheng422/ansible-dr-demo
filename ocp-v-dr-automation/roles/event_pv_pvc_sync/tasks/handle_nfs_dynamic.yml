@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-dynamic sync logic"
+  debug:
+    msg: "Sync logic for nfs-dynamic StorageClass would be executed here."

@@ -1,0 +1,22 @@
+---
+# tasks file for event_pv_pvc_sync
+- name: "Get StorageClass from resource_object"
+  set_fact:
+    storage_class_name: "{{ resource_object.spec.storageClassName | default('') }}"
+
+- name: "Debug: Determined storage class name"
+  debug:
+    msg: "Resource kind is {{ resource_object.kind }}, StorageClass is '{{ storage_class_name }}'"
+
+- name: "Include tasks for nfs-subdir StorageClass"
+  include_tasks: handle_nfs_subdir.yml
+  when: storage_class_name == 'nfs-subdir'
+
+- name: "Include tasks for nfs-dynamic StorageClass"
+  include_tasks: handle_nfs_dynamic.yml
+  when: storage_class_name == 'nfs-dynamic'
+
+- name: "Fail if StorageClass is not supported"
+  fail:
+    msg: "Unsupported StorageClass '{{ storage_class_name }}' for event-driven synchronization."
+  when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic']

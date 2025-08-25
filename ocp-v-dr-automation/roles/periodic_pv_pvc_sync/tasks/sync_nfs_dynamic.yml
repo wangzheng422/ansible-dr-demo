@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for periodic nfs-dynamic sync logic"
+  debug:
+    msg: "Periodic sync logic for nfs-dynamic StorageClass would be executed here for PV {{ pv_object.metadata.name }}."

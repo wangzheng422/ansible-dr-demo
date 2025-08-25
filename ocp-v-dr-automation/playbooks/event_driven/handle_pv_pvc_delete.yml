@@ -1,12 +1,12 @@
 ---
-- name: Handle VolumeSnapshot Delete Event
+- name: Handle PV/PVC Delete Event
   hosts: localhost
   gather_facts: false
   # The event resource object is passed from the EDA rulebook as 'resource_object'
   vars:
     resource_object: {}
   tasks:
-    - name: Include role to handle VolumeSnapshot deletion
+    - name: Include role to handle PV/PVC deletion
       include_role:
-        name: event_snapshot_delete
+        name: event_pv_pvc_delete
       when: resource_object is defined and resource_object
