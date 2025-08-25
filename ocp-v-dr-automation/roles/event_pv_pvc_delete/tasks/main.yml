@@ -16,7 +16,11 @@
   include_tasks: handle_nfs_dynamic.yml
   when: storage_class_name == 'nfs-dynamic'
 
+- name: "Include tasks for nfs-csi StorageClass deletion"
+  include_tasks: handle_nfs_csi.yml
+  when: storage_class_name == 'nfs-csi'
+
 - name: "Fail if StorageClass is not supported for deletion"
   fail:
     msg: "Unsupported StorageClass '{{ storage_class_name }}' for event-driven deletion."
-  when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic']
+  when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic', 'nfs-csi']

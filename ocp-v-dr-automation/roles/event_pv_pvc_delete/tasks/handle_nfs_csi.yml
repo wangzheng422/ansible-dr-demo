@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-csi delete logic"
+  debug:
+    msg: "Delete logic for nfs-csi StorageClass would be executed here."

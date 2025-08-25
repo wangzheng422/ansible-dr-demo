@@ -19,10 +19,14 @@
       include_tasks: sync_nfs_dynamic.yml
       when: storage_class_name == 'nfs-dynamic'
 
+    - name: "Include tasks for nfs-csi StorageClass"
+      include_tasks: sync_nfs_csi.yml
+      when: storage_class_name == 'nfs-csi'
+
     - name: "Fail if StorageClass is not supported"
       fail:
         msg: "Unsupported StorageClass '{{ storage_class_name }}' for periodic synchronization."
-      when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic']
+      when: storage_class_name not in ['nfs-subdir', 'nfs-dynamic', 'nfs-csi']
   loop: "{{ all_pvcs_to_sync }}"
   loop_control:
     label: "{{ item.metadata.namespace }}/{{ item.metadata.name }}"

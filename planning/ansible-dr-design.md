@@ -195,12 +195,14 @@ ocp-v-dr-automation/
 │   │   └── tasks/
 │   │       ├── main.yml          # -> 根据 storageClassName 分发
 │   │       ├── handle_nfs_subdir.yml
-│   │       └── handle_nfs_dynamic.yml
+│   │       ├── handle_nfs_dynamic.yml
+│   │       └── handle_nfs_csi.yml
 │   ├── event_pv_pvc_delete/      # 角色: (事件驱动) 处理 PV/PVC 删除
 │   │   └── tasks/
 │   │       ├── main.yml          # -> 根据 storageClassName 分发
 │   │       ├── handle_nfs_subdir.yml
-│   │       └── handle_nfs_dynamic.yml
+│   │       ├── handle_nfs_dynamic.yml
+│   │       └── handle_nfs_csi.yml
 │   ├── event_snapshot_sync/      # 角色: (事件驱动) 处理快照创建/更新
 │   ├── event_snapshot_delete/    # 角色: (事件驱动) 处理快照删除
 │   │
@@ -208,7 +210,8 @@ ocp-v-dr-automation/
 │   │   └── tasks/
 │   │       ├── main.yml          # -> 遍历并根据 storageClassName 分发
 │   │       ├── sync_nfs_subdir.yml
-│   │       └── sync_nfs_dynamic.yml
+│   │       ├── sync_nfs_dynamic.yml
+│   │       └── sync_nfs_csi.yml
 │   ├── periodic_snapshot_sync/   # 角色: (周期同步) 同步快照
 │   │
 │   ├── oadp_backup_parser/       # 角色: (DR用) 解析OADP备份
@@ -266,7 +269,7 @@ ocp-v-dr-automation/
     2.  调用 `event_pv_pvc_sync` 角色进行处理。
     3.  **角色逻辑 (`event_pv_pvc_sync`)**:
         *   **核心**: 角色内部的 `main.yml` 会检查 `resource_object.spec.storageClassName`。
-        *   使用 `include_tasks` 或类似机制，根据 `storageClassName` (例如 `nfs-subdir`, `nfs-dynamic`) 调用对应的处理文件 (例如 `handle_nfs_subdir.yml`)。
+        *   使用 `include_tasks` 或类似机制，根据 `storageClassName` (例如 `nfs-subdir`, `nfs-dynamic`, `nfs-csi`) 调用对应的处理文件 (例如 `handle_nfs_subdir.yml`)。
         *   特定处理文件负责执行该存储类型的数据同步 (如 `rsync`) 和元数据处理。
   * **playbooks/event_driven/handle_pv_pvc_delete.yml**:
     1.  接收 `resource_object`。
@@ -299,7 +302,7 @@ ocp-v-dr-automation/
     *   **遍历**: 角色内部 `loop` 循环遍历所有需要同步的 PVC。
     *   **核心：存储逻辑分发**:
         *   对于每个 PVC，角色会检查其关联 PV 的 `spec.storageClassName`。
-        *   根据 `storageClassName`，使用 `include_tasks` 调用特定于该存储类型的同步逻辑文件（例如 `sync_nfs_subdir.yml`, `sync_nfs_dynamic.yml`）。
+        *   根据 `storageClassName`，使用 `include_tasks` 调用特定于该存储类型的同步逻辑文件（例如 `sync_nfs_subdir.yml`, `sync_nfs_dynamic.yml`, `sync_nfs_csi.yml`）。
     *   **特定存储逻辑 (以 `sync_nfs_*.yml` 为例)**:
         1.  **数据同步**: `delegate_to` 到主存储服务器，执行 `rsync` 将数据同步到灾备存储服务器。
         2.  **修改 PV 定义**: 在内存中修改 PV 定义，使其指向灾备存储服务器的路径和地址。同时，将 `persistentVolumeReclaimPolicy` 强制设置为 `Retain`。
@@ -357,7 +360,7 @@ ocp-v-dr-automation/
 *   **Playbook 内部逻辑**:
     1.  **输入**: `oadp_backup_parser` 角色输出的 `pv_info_list`。
     2.  **核心：存储逻辑分发**: Playbook 会遍历 `pv_info_list`。对于列表中的每一个 PV 对象，它会检查 `item.spec.storageClassName`。
-    3.  **动态调用验证任务**: 根据 `storageClassName`，Playbook 会动态地 `include_tasks` 一个特定于该存储类型的验证任务文件。例如，如果 `storageClassName` 是 `nfs-dynamic`，它会调用 `verify_nfs_dynamic.yml`。
+    3.  **动态调用验证任务**: 根据 `storageClassName`，Playbook 会动态地 `include_tasks` 一个特定于该存储类型的验证任务文件。例如，如果 `storageClassName` 是 `nfs-dynamic`，它会调用 `verify_nfs_dynamic.yml`。对于 `nfs-csi` 也会有对应的 `verify_nfs_csi.yml`。
     4.  **特定存储验证 (以 NFS 为例)**:
         *   **目标**: 验证灾备端的数据是否就绪。
         *   **操作**: `delegate_to` 到灾备 NFS 服务器 (`dr_nfs_server`)。

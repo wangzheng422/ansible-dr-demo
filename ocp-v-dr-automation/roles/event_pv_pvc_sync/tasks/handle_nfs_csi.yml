@@ -1,0 +1,4 @@
+---
+- name: "Placeholder for nfs-csi sync logic"
+  debug:
+    msg: "Sync logic for nfs-csi StorageClass would be executed here."
