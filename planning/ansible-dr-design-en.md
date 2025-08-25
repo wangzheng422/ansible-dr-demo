@@ -179,35 +179,58 @@ graph TD
     class H,I verification;
 ```
 
-### **3. Ansible Project Structure Design (EDA Integration)**
+### **3. Ansible Project Structure Design (Architecture Update)**
+
+To support multiple `StorageClass` types and decouple the processing logic for PV/PVC from VolumeSnapshot, the project structure is updated as follows:
+
 ```
 ocp-v-dr-automation/
 ├── inventory/
-│   └── hosts.ini                 # Host Inventory
+│   └── hosts.ini
 ├── group_vars/
-│   ├── all.yml
-│   └── ...
+│   └── all.yml
 ├── rulebooks/
-│   └── ocp_dr_events.yml         # EDA rulebook, listens for PV and Snapshot events
+│   └── ocp_dr_events.yml         # EDA rulebook, listens for all events
 ├── roles/
-│   ├── nfs_sync_on_event/        # Role: Responds to PV create/modify events, executes rsync
-│   ├── nfs_delete_on_event/      # Role: Responds to PV delete events, deletes remote directory
-│   ├── snapshot_sync_on_event/   # Role: Responds to Snapshot create events, syncs metadata
-│   ├── snapshot_delete_on_event/ # Role: Responds to Snapshot delete events, cleans up metadata
+│   ├── event_pv_pvc_sync/        # Role: (Event-Driven) Handles PV/PVC creation/update
+│   │   └── tasks/
+│   │       ├── main.yml          # -> Dispatches based on storageClassName
+│   │       ├── handle_nfs_subdir.yml
+│   │       ├── handle_nfs_dynamic.yml
+│   │       └── handle_nfs_csi.yml
+│   ├── event_pv_pvc_delete/      # Role: (Event-Driven) Handles PV/PVC deletion
+│   │   └── tasks/
+│   │       ├── main.yml          # -> Dispatches based on storageClassName
+│   │       ├── handle_nfs_subdir.yml
+│   │       ├── handle_nfs_dynamic.yml
+│   │       └── handle_nfs_csi.yml
+│   ├── event_snapshot_sync/      # Role: (Event-Driven) Handles snapshot creation/update
+│   ├── event_snapshot_delete/    # Role: (Event-Driven) Handles snapshot deletion
+│   │
+│   ├── periodic_pv_pvc_sync/     # Role: (Periodic Sync) Syncs PV/PVC
+│   │   └── tasks/
+│   │       ├── main.yml          # -> Iterates and dispatches based on storageClassName
+│   │       ├── sync_nfs_subdir.yml
+│   │       ├── sync_nfs_dynamic.yml
+│   │       └── sync_nfs_csi.yml
+│   ├── periodic_snapshot_sync/   # Role: (Periodic Sync) Syncs snapshots
+│   │
 │   ├── oadp_backup_parser/       # Role: (For DR) Parses OADP backups
-│   ├── dr_storage_provisioner/   # Role: (For DR) Deploys PV/PVC on DR cluster
-│   ├── oadp_restore_trigger/     # Role: (For DR) Executes OADP restore
-│   └── periodic_storage_sync/    # Role: (For periodic tasks) Iterates and syncs all storage resources
+│   ├── dr_storage_provisioner/   # Role: (For DR) Deploys PV/PVC on DR cluster (on-demand)
+│   └── oadp_restore_trigger/     # Role: (For DR) Executes OADP restore
+│
 └── playbooks/
     ├── event_driven/
-    │   ├── handle_nfs_pv_sync.yml    # Playbook: (For EDA) Calls nfs_sync_on_event
-    │   ├── handle_nfs_pv_delete.yml  # Playbook: (For EDA) Calls nfs_delete_on_event
-    │   ├── handle_snapshot_sync.yml  # Playbook: (For EDA) Calls snapshot_sync_on_event
-    │   └── handle_snapshot_delete.yml# Playbook: (For EDA) Calls snapshot_delete_on_event
+    │   ├── handle_pv_pvc_sync.yml    # Playbook: (EDA) Calls event_pv_pvc_sync
+    │   ├── handle_pv_pvc_delete.yml  # Playbook: (EDA) Calls event_pv_pvc_delete
+    │   ├── handle_snapshot_sync.yml  # Playbook: (EDA) Calls event_snapshot_sync
+    │   └── handle_snapshot_delete.yml# Playbook: (EDA) Calls event_snapshot_delete
+    │
     ├── manual_dr/
-    │   └── execute_failover.yml      # Playbook: (For DR) Executes a complete disaster recovery failover
+    │   └── execute_failover.yml      # Playbook: (For DR) Executes a complete failover
+    │
     └── scheduled/
-        └── execute_periodic_sync.yml # Playbook: (For periodic tasks) Executes a complete periodic synchronization
+        └── execute_periodic_sync.yml # Playbook: (Periodic) Calls periodic_pv_pvc_sync and periodic_snapshot_sync in sequence
 ```
 ### **4. Mode One: Event-Driven Data Replication Logic Explained**
 
@@ -240,66 +263,71 @@ ocp-v-dr-automation/
         - **Namespaced resources (PVC, VS)**: Before processing an event, check if the resource's namespace is in the `watched_namespaces` list.
     - **Trigger Action**: When a rule matches, it calls the `run_job_template` action, passing the resource object from the event (`event.resource`) as `extra_vars` to the corresponding AAP job template (e.g., "EDA - Sync PV to DR" or "EDA - Delete PVC from DR"), thus starting the subsequent sync or cleanup process.
     - **Special Handling for Snapshots**: For `VolumeSnapshot` creation events, the rule adds a condition to check `status.readyToUse == true`, ensuring the sync is triggered only when the snapshot is available.
-*   **Corresponding Playbooks**:
-    *   Playbooks should now be more generic to handle different types of resource objects. For example, there could be a common `handle_resource_sync.yml` and `handle_resource_delete.yml` that receive a `resource_object` variable and call different roles or execute different logic based on `resource_object.kind`.
-    *   **playbooks/event_driven/handle_resource_sync.yml**:
-        1.  Receives the `resource_object` variable from AAP EDA.
-        2.  Calls the appropriate sync role based on `resource_object.kind` (e.g., "PersistentVolume", "PersistentVolumeClaim").
-        3.  Role logic: Parses the incoming `resource_object` and performs data and metadata synchronization.
-    *   **playbooks/event_driven/handle_resource_delete.yml**:
-        1.  Receives the `resource_object` variable.
-        2.  Calls the appropriate deletion role based on `resource_object.kind`.
-        3.  Role logic: Parses the incoming `resource_object` and performs cleanup operations on the DR side.
+*   **Corresponding Playbooks and Roles**:
+    *   **Logic Separation**: The playbook layer now strictly separates PV/PVC events from VolumeSnapshot events, calling different dedicated playbooks.
+    *   **playbooks/event_driven/handle_pv_pvc_sync.yml**:
+        1.  Receives the `resource_object` (PV or PVC) passed from AAP EDA.
+        2.  Calls the `event_pv_pvc_sync` role for processing.
+        3.  **Role Logic (`event_pv_pvc_sync`)**:
+            *   **Core**: The `main.yml` within the role checks `resource_object.spec.storageClassName`.
+            *   Uses `include_tasks` or a similar mechanism to call the corresponding handler file (e.g., `handle_nfs_subdir.yml`) based on the `storageClassName` (e.g., `nfs-subdir`, `nfs-dynamic`, `nfs-csi`).
+            *   The specific handler file is responsible for executing data synchronization (like `rsync`) and metadata processing for that storage type.
+    *   **playbooks/event_driven/handle_pv_pvc_delete.yml**:
+        1.  Receives the `resource_object`.
+        2.  Calls the `event_pv_pvc_delete` role.
+        3.  **Role Logic (`event_pv_pvc_delete`)**: Also dispatches based on `storageClassName` to perform storage-specific cleanup operations.
+    *   **playbooks/event_driven/handle_snapshot_sync.yml**:
+        1.  Receives the `resource_object` (VolumeSnapshot or VolumeSnapshotContent).
+        2.  Calls the `event_snapshot_sync` role, which is responsible for syncing snapshot metadata.
+    *   **playbooks/event_driven/handle_snapshot_delete.yml**:
+        1.  Receives the `resource_object`.
+        2.  Calls the `event_snapshot_delete` role, responsible for cleaning up snapshot metadata.
 
 ### **5. Mode Two: Periodic Proactive Sync Logic Explained**
 
-This process is triggered periodically by the AAP Scheduler, for example, every hour, serving as a supplement and validation for the event-driven mode.
+This process is triggered periodically by the AAP Scheduler, serving as a supplement and validation for the event-driven mode. **Following the architecture update, the sync logic for PV/PVC is separated from the VolumeSnapshot sync logic into different roles for better modularity and extensibility.**
 
 *   **Playbook**: `playbooks/scheduled/execute_periodic_sync.yml`
-*   **Core Role**: `roles/periodic_storage_sync`
+*   **Core Roles**: `roles/periodic_pv_pvc_sync`, `roles/periodic_snapshot_sync`
 *   **Key Variable**: The playbook should specify the namespaces to sync via the `target_namespaces` variable (e.g., `['ns1', 'ns2']`).
 
 #### 5.1 Get All Relevant Resources
-*   Connect to the primary OpenShift cluster (`ocp_primary`).
-*   Using the `k8s_info` module, iterate through the `target_namespaces` list to get lists of `PersistentVolumeClaim` and `VolumeSnapshot` for each namespace.
-*   Using the `k8s_info` module, get lists of all related `PersistentVolume` and `VolumeSnapshotContent` (these are non-namespaced but can be filtered by their associated PVCs and VolumeSnapshots).
+*   This step remains unchanged. The playbook first connects to the primary OpenShift cluster (`ocp_primary`).
+*   Using the `k8s_info` module, it gets lists of all `PersistentVolumeClaim` and `VolumeSnapshot` in the `target_namespaces`.
+*   It also gets lists of all related `PersistentVolume` and `VolumeSnapshotContent`.
 
-#### 5.2 Iterate and Sync PVC/PV (Warm Standby)
-*   In the playbook, use a `loop` to iterate through the retrieved list of PVCs.
-*   For each PVC, find its bound PV (`spec.volumeName`).
-*   Call the `periodic_storage_sync` role, passing the PVC and PV objects.
-*   **Role Logic (`periodic_storage_sync`)**:
-    *   **Input**: `pvc_object` and `pv_object`.
-    *   **Step 1: Data Sync**: `delegate_to` the primary NFS server and execute `rsync` to sync data to the DR NFS server. **Note**: This requires key-based passwordless SSH login from the primary NFS server (`primary_nfs_server`) to the DR NFS server (`dr_nfs_server`).
-    *   **Step 2: Modify PV Definition**: In memory, modify the `pv_object` definition, pointing its `spec.nfs.server` to the DR NFS server (`dr_nfs_server`). Also, forcibly set `spec.persistentVolumeReclaimPolicy` to `Retain` to prevent the PV status from failing on the DR side due to a missing delete plugin.
-    *   **Step 3: Clean and Apply PV/PVC**:
-        *   **Clean Metadata**: Before applying to the DR cluster, you must clean source-cluster-specific metadata from the PV and PVC objects. This includes `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations`, the `status` field, and `spec.claimRef` in the PV. Removing `claimRef` allows the PV on the DR side to be bound by a new PVC.
-        *   **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to connect to the DR OpenShift cluster (`ocp_dr`) via `ocp_dr_api_server` and `ocp_dr_api_key` variables, then `apply` the cleaned and modified PV definition and the cleaned PVC definition to the cluster.
-    *   **Log Status**: Record the deployment status of each PV and PVC on the DR cluster.
-    *   **Note**: This "Warm Standby" mode means storage resources are pre-created on the DR side, thus reducing recovery time.
+#### 5.2 Periodic Sync of PVC/PV (Warm Standby)
+*   **Playbook Logic**: The main playbook (`execute_periodic_sync.yml`) calls the `periodic_pv_pvc_sync` role, passing the retrieved PV and PVC lists as parameters.
+*   **Role Logic (`periodic_pv_pvc_sync`)**:
+    *   **Input**: `all_pvs` and `all_pvcs` lists.
+    *   **Iteration**: The role loops through all PVCs that need to be synced.
+    *   **Core: Storage Logic Dispatch**:
+        *   For each PVC, the role checks the `spec.storageClassName` of its associated PV.
+        *   Based on the `storageClassName`, it uses `include_tasks` to call the sync logic file specific to that storage type (e.g., `sync_nfs_subdir.yml`, `sync_nfs_dynamic.yml`, `sync_nfs_csi.yml`).
+    *   **Specific Storage Logic (e.g., `sync_nfs_*.yml`)**:
+        1.  **Data Sync**: `delegate_to` the primary storage server to execute `rsync` to sync data to the DR storage server.
+        2.  **Modify PV Definition**: In memory, modify the PV definition to point to the DR storage server's path and address. Also, forcibly set `persistentVolumeReclaimPolicy` to `Retain`.
+        3.  **Clean Metadata**: Before applying to the DR cluster, clean source-cluster-specific metadata from the PV and PVC objects (like `resourceVersion`, `uid`, `claimRef`, etc.).
+        4.  **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to `apply` the cleaned and modified PV and PVC definitions to the DR cluster.
+    *   **Log Status**: Record the sync status of each PV and PVC.
 
-#### 5.3 Iterate and Sync VolumeSnapshot/VolumeSnapshotContent
-*   This functionality is now implemented to sync snapshot metadata to the DR site.
-*   The playbook uses a `loop` to iterate through the retrieved `VolumeSnapshot` list.
-*   For each `VolumeSnapshot` (where `status.readyToUse == true`), find its bound `VolumeSnapshotContent` (`status.boundVolumeSnapshotContentName`).
-*   Call the `periodic_storage_sync` role, passing `snapshot_object` and `content_object` variables.
-*   **Role Logic**:
-    *   **Input**: `snapshot_object` and `content_object`.
-    *   **Core Function: Metadata Sync**: The primary task of this role is to synchronize Kubernetes resource objects, ensuring the DR cluster is aware of these snapshots.
-    *   **Clean Metadata**: Before applying to the DR cluster, the role cleans source-cluster-specific metadata from the `VolumeSnapshot` and `VolumeSnapshotContent` objects. This includes `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`, `metadata.annotations`, and the `status` field.
-    *   **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to `apply` the cleaned `VolumeSnapshot` and `VolumeSnapshotContent` definitions to the DR OpenShift cluster.
-    *   **Data Sync Note**: The current implementation focuses on metadata synchronization. The underlying snapshot data (e.g., the actual data in the `.snapshot` directory on NFS) is assumed to be synchronized by other storage-level mechanisms (like storage array replication or custom logic with `rsync`). The Ansible role itself does not perform an `rsync` of the snapshot data.
+#### 5.3 Periodic Sync of VolumeSnapshot/VolumeSnapshotContent
+*   **Playbook Logic**: After the PV/PVC sync is complete, the main playbook calls the `periodic_snapshot_sync` role, passing the retrieved VolumeSnapshot and VolumeSnapshotContent lists as parameters.
+*   **Role Logic (`periodic_snapshot_sync`)**:
+    *   **Input**: `all_snapshots` and `all_snapshot_contents` lists.
+    *   **Iteration**: The role loops through all `readyToUse` VolumeSnapshots.
+    *   **Metadata Sync**:
+        1.  **Clean Metadata**: Clean source-cluster-specific metadata from the VolumeSnapshot and VolumeSnapshotContent objects.
+        2.  **Apply to DR Cluster**: Use the `kubernetes.core.k8s` module to `apply` the cleaned definitions to the DR cluster.
+    *   **Data Sync Note**: This role focuses on metadata synchronization. The underlying snapshot data is assumed to be handled by storage-level replication or custom logic with `rsync`.
 
 #### 5.4 Clean Stale Resources on DR Site
-*   After syncing all resources from the primary site, the playbook performs a reverse check.
-*   It fetches all relevant resources (PV, PVC, VolumeSnapshot, VolumeSnapshotContent, etc.) from the specified namespaces on the DR site.
-*   It compares the list of resources from the DR site with the list from the primary site.
-*   If a resource is found on the DR site but not on the primary site, it is considered stale (deleted from primary) and will be deleted from the DR site.
-*   All deletion operations are logged.
+*   This logic is executed at the end of the main playbook and remains unchanged.
+*   It fetches the lists of PV/PVC and VolumeSnapshot/VSC from the DR site.
+*   It compares them with the resource lists from the primary site and deletes any extra resources found on the DR site.
 
 #### 5.5 Generate Report
-*   At the end of the playbook, summarize the synchronization and cleanup results for all resources.
-*   Generate a concise report indicating which resources were synced successfully, which failed, and which were cleaned up. This report can be sent to administrators via email, webhook, etc.
+*   This step remains unchanged, summarizing all operation results at the end of the playbook and generating a report.
 
 ### **6. Mode Three: Manual Disaster Recovery Logic Explained**
 
@@ -328,14 +356,17 @@ This process is manually initiated by an administrator via an AAP Workflow Templ
     4.  Unzips and parses it, extracting all PV, PVC, VolumeSnapshot, and VolumeSnapshotContent JSON definitions into `pv_info_list`, `pvc_info_list`, `vs_info_list`, and `vsc_info_list` variables.
     5.  **Output**: List variables containing all parsed resource definitions.
 
-#### 6.3 Storage Logic Dispatch and Validation (NFS Scenario)
+#### 6.3 Storage Logic Dispatch and Validation
 
 *   **Playbook Internal Logic**:
-    1.  **Input**: The `pv_info_list` from the previous step.
-    2.  **Logic Dispatch**: Use a `when` condition or the `when` clause of `include_role` to decide which storage type's validation logic to execute based on `item.spec.storageClassName`.
-    3.  **NFS Validation**: **On the DR site's NFS server (`delegate_to: dr_nfs_server`)**, perform data validation. This step no longer performs data synchronization but is simplified to check if the data directory exists on the DR side.
-        *   Based on the path information for each PV in `pv_info_list`, check if the corresponding directory has been created on the DR NFS server.
-        *   If a directory does not exist, log a warning or error, indicating a potential issue with the periodic sync.
+    1.  **Input**: The `pv_info_list` from the `oadp_backup_parser` role.
+    2.  **Core: Storage Logic Dispatch**: The playbook iterates through the `pv_info_list`. For each PV object in the list, it checks `item.spec.storageClassName`.
+    3.  **Dynamic Task Inclusion**: Based on the `storageClassName`, the playbook dynamically `include_tasks` a validation task file specific to that storage type. For example, if `storageClassName` is `nfs-dynamic`, it will call `verify_nfs_dynamic.yml`. There will be a corresponding `verify_nfs_csi.yml` for `nfs-csi`.
+    4.  **Specific Storage Validation (NFS Example)**:
+        *   **Objective**: Verify that the data on the DR side is ready.
+        *   **Action**: `delegate_to` the DR NFS server (`dr_nfs_server`).
+        *   Based on the path information in the PV definition, check if the corresponding directory exists and is not empty on the DR NFS server.
+        *   This is a verification step, not a synchronization. If verification fails, it will log a critical warning or abort the process, indicating a problem with the periodic sync and that the DR data is unreliable.
 
 #### 6.4 Restore Applications on DR OCP
 
