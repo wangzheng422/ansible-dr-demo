@@ -16,7 +16,7 @@
         (event.type == "ADDED" or event.type == "MODIFIED")
       action:
         run_playbook:
-          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_sync.yml
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_pv_pvc_sync.yml
           extra_vars:
             resource_object: "{{ event.resource }}"
 
@@ -27,7 +27,7 @@
         event.type == "DELETED"
       action:
         run_playbook:
-          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_delete.yml
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_pv_pvc_delete.yml
           extra_vars:
             resource_object: "{{ event.resource }}"
 
@@ -40,7 +40,7 @@
       action:
         run_playbook:
           # NOTE: Using the PV sync playbook. The playbook needs to handle PVC objects.
-          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_sync.yml
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_pv_pvc_sync.yml
           extra_vars:
             resource_object: "{{ event.resource }}"
 
@@ -53,7 +53,7 @@
       action:
         run_playbook:
           # NOTE: Using the PV delete playbook. The playbook needs to handle PVC objects.
-          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_nfs_pv_delete.yml
+          name: ../ocp-v-dr-automation/playbooks/event_driven/handle_pv_pvc_delete.yml
           extra_vars:
             resource_object: "{{ event.resource }}"
 
